@@ -1,0 +1,2156 @@
+### 1. requirements.txt
+
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-WTF==1.2.1
+Werkzeug==3.0.1
+WTForms==3.1.1
+openpyxl==3.1.2
+pandas==2.1.4
+python-dotenv==1.0.0
+gunicorn==21.2.0
+
+### 2. config.py
+
+import os
+from datetime import timedelta
+
+class Config:
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'ws-issue-dashboard-secret-key-change-in-production'
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///' + os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'ws_issues.db')
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    REMEMBER_COOKIE_DURATION = timedelta(days=30)
+    SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    WTF_CSRF_TIME_LIMIT = None
+
+### 3. app/init.py
+
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager
+from config import Config
+
+db = SQLAlchemy()
+login_manager = LoginManager()
+login_manager.login_view = 'auth.login'
+login_manager.login_message = 'Please log in to access the WS Issue Dashboard.'
+login_manager.login_message_category = 'info'
+
+def create_app(config_class=Config):
+    app = Flask(__name__)
+    app.config.from_object(config_class)
+
+    db.init_app(app)
+    login_manager.init_app(app)
+
+    from app.routes import bp as main_bp
+    app.register_blueprint(main_bp)
+
+    from app.auth import bp as auth_bp
+    app.register_blueprint(auth_bp, url_prefix='/auth')
+
+    from app.api import bp as api_bp
+    app.register_blueprint(api_bp, url_prefix='/api')
+
+    with app.app_context():
+        db.create_all()
+        from app.models import User
+        if not User.query.filter_by(username='admin').first():
+            admin = User(username='admin', email='admin@wondersoft.com', role='admin')
+            admin.set_password('admin123')
+            db.session.add(admin)
+            db.session.commit()
+            print('Default admin user created: admin / admin123')
+
+    return app
+
+### 4. app/models.py
+
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime
+from app import db
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256), nullable=False)
+    role = db.Column(db.String(20), default='viewer')  # admin, editor, viewer
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_login = db.Column(db.DateTime)
+
+    issues_created = db.relationship('Issue', backref='creator', lazy='dynamic', foreign_keys='Issue.created_by')
+    issues_assigned = db.relationship('Issue', backref='assignee', lazy='dynamic', foreign_keys='Issue.assigned_to')
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+class Issue(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    status = db.Column(db.String(50), default='Open', index=True)
+    priority = db.Column(db.String(20), default='Medium', index=True)
+    category = db.Column(db.String(100), index=True)
+    module = db.Column(db.String(100), index=True)
+    version = db.Column(db.String(50))
+    assigned_to = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    due_date = db.Column(db.DateTime, nullable=True)
+    tags = db.Column(db.String(500))
+    attachments = db.Column(db.Text)
+
+    comments = db.relationship('Comment', backref='issue', lazy='dynamic', cascade='all, delete-orphan')
+    history = db.relationship('IssueHistory', backref='issue', lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<Issue {self.id}: {self.title}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'description': self.description,
+            'status': self.status,
+            'priority': self.priority,
+            'category': self.category,
+            'module': self.module,
+            'version': self.version,
+            'assigned_to': self.assignee.username if self.assignee else None,
+            'assigned_to_id': self.assigned_to,
+            'created_by': self.creator.username if self.creator else None,
+            'created_by_id': self.created_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+            'due_date': self.due_date.isoformat() if self.due_date else None,
+            'tags': self.tags,
+            'attachments': self.attachments
+        }
+
+class Comment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    issue_id = db.Column(db.Integer, db.ForeignKey('issue.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    author = db.relationship('User', backref='comments')
+
+    def __repr__(self):
+        return f'<Comment {self.id} on Issue {self.issue_id}>'
+
+class IssueHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    issue_id = db.Column(db.Integer, db.ForeignKey('issue.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    field_name = db.Column(db.String(100), nullable=False)
+    old_value = db.Column(db.Text)
+    new_value = db.Column(db.Text)
+    changed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='issue_history')
+
+    def __repr__(self):
+        return f'<IssueHistory {self.id}: {self.field_name} changed>'
+
+ISSUE_STATUSES = ['Open', 'In Progress', 'In Review', 'Resolved', 'Closed', 'Reopened']
+ISSUE_PRIORITIES = ['Low', 'Medium', 'High', 'Critical']
+ISSUE_CATEGORIES = ['Bug', 'Feature Request', 'Enhancement', 'Documentation', 'Performance', 'Security', 'UI/UX', 'Integration', 'Database', 'API', 'Testing', 'Other']
+COMMON_MODULES = ['Authentication', 'Dashboard', 'Reporting', 'User Management', 'Settings', 'API', 'Database', 'Frontend', 'Backend', 'Mobile', 'Integration', 'Other']
+
+### 5. app/forms.py
+
+from flask_wtf import FlaskForm
+from wtforms import StringField, TextAreaField, SelectField, DateField, SubmitField, HiddenField, MultipleFileField
+from wtforms.validators import DataRequired, Length, Optional, Email, ValidationError
+from app.models import User, ISSUE_STATUSES, ISSUE_PRIORITIES, ISSUE_CATEGORIES, COMMON_MODULES
+
+class LoginForm(FlaskForm):
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    password = StringField('Password', validators=[DataRequired()])
+    remember_me = SelectField('Remember Me', choices=[('y', 'Yes'), ('n', 'No')], default='n')
+    submit = SubmitField('Sign In')
+
+class RegistrationForm(FlaskForm):
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    email = StringField('Email', validators=[DataRequired(), Email(), Length(max=120)])
+    password = StringField('Password', validators=[DataRequired(), Length(min=6)])
+    confirm_password = StringField('Confirm Password', validators=[DataRequired()])
+    submit = SubmitField('Register')
+
+    def validate_username(self, username):
+        user = User.query.filter_by(username=username.data).first()
+        if user:
+            raise ValidationError('Username already taken. Please choose a different one.')
+
+    def validate_email(self, email):
+        user = User.query.filter_by(email=email.data).first()
+        if user:
+            raise ValidationError('Email already registered. Please use a different one.')
+
+    def validate_confirm_password(self, confirm_password):
+        if confirm_password.data != self.password.data:
+            raise ValidationError('Passwords do not match.')
+
+class IssueForm(FlaskForm):
+    id = HiddenField('Issue ID')
+    title = StringField('Title', validators=[DataRequired(), Length(max=200)])
+    description = TextAreaField('Description', validators=[Optional()])
+    status = SelectField('Status', choices=[(s, s) for s in ISSUE_STATUSES], default='Open')
+    priority = SelectField('Priority', choices=[(p, p) for p in ISSUE_PRIORITIES], default='Medium')
+    category = SelectField('Category', choices=[(c, c) for c in ISSUE_CATEGORIES], default='Bug')
+    module = SelectField('Module', choices=[('', 'Select Module')] + [(m, m) for m in COMMON_MODULES], validators=[Optional()])
+    version = StringField('Version', validators=[Optional(), Length(max=50)])
+    assigned_to = SelectField('Assigned To', coerce=int, validators=[Optional()])
+    due_date = DateField('Due Date', format='%Y-%m-%d', validators=[Optional()])
+    tags = StringField('Tags (comma-separated)', validators=[Optional(), Length(max=500)])
+    submit = SubmitField('Save Issue')
+
+    def __init__(self, *args, **kwargs):
+        super(IssueForm, self).__init__(*args, **kwargs)
+        users = User.query.filter_by(is_active=True).order_by(User.username).all()
+        self.assigned_to.choices = [(0, 'Unassigned')] + [(u.id, u.username) for u in users]
+
+class UserForm(FlaskForm):
+    id = HiddenField('User ID')
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
+    email = StringField('Email', validators=[DataRequired(), Email(), Length(max=120)])
+    role = SelectField('Role', choices=[('admin', 'Admin'), ('editor', 'Editor'), ('viewer', 'Viewer')], default='viewer')
+    is_active = SelectField('Active', choices=[('true', 'Yes'), ('false', 'No')], default='true')
+    password = StringField('New Password (leave blank to keep current)', validators=[Optional(), Length(min=6)])
+    confirm_password = StringField('Confirm New Password', validators=[Optional()])
+    submit = SubmitField('Save User')
+
+    def validate_confirm_password(self, confirm_password):
+        if self.password.data and confirm_password.data != self.password.data:
+            raise ValidationError('Passwords do not match.')
+
+class ImportForm(FlaskForm):
+    file = MultipleFileField('Excel File', validators=[DataRequired()])
+    submit = SubmitField('Import Issues')
+
+class CommentForm(FlaskForm):
+    issue_id = HiddenField('Issue ID')
+    content = TextAreaField('Comment', validators=[DataRequired()])
+    submit = SubmitField('Add Comment')
+
+### 6. app/auth.py
+
+from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask_login import login_user, logout_user, login_required, current_user
+from werkzeug.urls import url_parse
+from app import db
+from app.models import User
+from app.forms import LoginForm, RegistrationForm
+
+bp = Blueprint('auth', __name__)
+
+@bp.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('main.dashboard'))
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user is None or not user.check_password(form.password.data):
+            flash('Invalid username or password', 'danger')
+            return redirect(url_for('auth.login'))
+        if not user.is_active:
+            flash('Your account is deactivated. Please contact an administrator.', 'danger')
+            return redirect(url_for('auth.login'))
+        login_user(user, remember=form.remember_me.data == 'y')
+        user.last_login = db.func.now()
+        db.session.commit()
+        next_page = request.args.get('next')
+        if not next_page or url_parse(next_page).netloc != '':
+            next_page = url_for('main.dashboard')
+        return redirect(next_page)
+    return render_template('auth/login.html', title='Sign In', form=form)
+
+@bp.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('auth.login'))
+
+@bp.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('main.dashboard'))
+    form = RegistrationForm()
+    if form.validate_on_submit():
+        user = User(username=form.username.data, email=form.email.data, role='viewer')
+        user.set_password(form.password.data)
+        db.session.add(user)
+        db.session.commit()
+        flash('Congratulations, you are now a registered user!', 'success')
+        return redirect(url_for('auth.login'))
+    return render_template('auth/register.html', title='Register', form=form)
+
+### 7. app/routes.py
+
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, send_file
+from flask_login import login_required, current_user
+from app import db
+from app.models import User, Issue, Comment, IssueHistory, ISSUE_STATUSES, ISSUE_PRIORITIES, ISSUE_CATEGORIES, COMMON_MODULES
+from app.forms import IssueForm, UserForm, ImportForm, CommentForm
+from datetime import datetime
+import pandas as pd
+import json
+import io
+
+bp = Blueprint('main', __name__)
+
+def log_history(issue, user, field_name, old_value, new_value):
+    if old_value != new_value:
+        history = IssueHistory(
+            issue_id=issue.id,
+            user_id=user.id,
+            field_name=field_name,
+            old_value=str(old_value) if old_value is not None else "",
+            new_value=str(new_value) if new_value is not None else ""
+        )
+        db.session.add(history)
+
+@bp.route("/")
+@bp.route("/dashboard")
+@login_required
+def dashboard():
+    total_issues = Issue.query.count()
+    open_issues = Issue.query.filter(Issue.status.in_(["Open", "Reopened"])).count()
+    in_progress = Issue.query.filter_by(status="In Progress").count()
+    resolved = Issue.query.filter_by(status="Resolved").count()
+    closed = Issue.query.filter_by(status="Closed").count()
+
+    priority_stats = {}
+    for p in ISSUE_PRIORITIES:
+        priority_stats[p] = Issue.query.filter_by(priority=p).count()
+
+    status_stats = {}
+    for s in ISSUE_STATUSES:
+        status_stats[s] = Issue.query.filter_by(status=s).count()
+
+    recent_issues = Issue.query.order_by(Issue.created_at.desc()).limit(10).all()
+    my_issues = Issue.query.filter_by(assigned_to=current_user.id).filter(Issue.status.notin_(["Closed", "Resolved"])).order_by(Issue.priority.desc(), Issue.created_at).all()
+    overdue = Issue.query.filter(Issue.due_date < datetime.utcnow(), Issue.status.notin_(["Closed", "Resolved"])).count()
+
+    return render_template("dashboard.html",
+        title="Dashboard",
+        total_issues=total_issues,
+        open_issues=open_issues,
+        in_progress=in_progress,
+        resolved=resolved,
+        closed=closed,
+        priority_stats=priority_stats,
+        status_stats=status_stats,
+        recent_issues=recent_issues,
+        my_issues=my_issues,
+        overdue=overdue,
+        current_user=current_user
+    )
+
+@bp.route("/issues")
+@login_required
+def issues_list():
+    page = request.args.get("page", 1, type=int)
+    status_filter = request.args.get("status", "")
+    priority_filter = request.args.get("priority", "")
+    category_filter = request.args.get("category", "")
+    module_filter = request.args.get("module", "")
+    assignee_filter = request.args.get("assignee", "", type=int)
+    search = request.args.get("search", "")
+
+    query = Issue.query
+
+    if status_filter:
+        query = query.filter_by(status=status_filter)
+    if priority_filter:
+        query = query.filter_by(priority=priority_filter)
+    if category_filter:
+        query = query.filter_by(category=category_filter)
+    if module_filter:
+        query = query.filter_by(module=module_filter)
+    if assignee_filter:
+        query = query.filter_by(assigned_to=assignee_filter)
+    if search:
+        query = query.filter(
+            db.or_(
+                Issue.title.contains(search),
+                Issue.description.contains(search),
+                Issue.tags.contains(search)
+            )
+        )
+
+    issues = query.order_by(Issue.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
+
+    users = User.query.filter_by(is_active=True).order_by(User.username).all()
+
+    return render_template("issues/list.html",
+        title="Issues",
+        issues=issues,
+        users=users,
+        statuses=ISSUE_STATUSES,
+        priorities=ISSUE_PRIORITIES,
+        categories=ISSUE_CATEGORIES,
+        modules=COMMON_MODULES,
+        current_filters={
+            "status": status_filter,
+            "priority": priority_filter,
+            "category": category_filter,
+            "module": module_filter,
+            "assignee": assignee_filter,
+            "search": search
+        }
+    )
+
+@bp.route("/issue/new", methods=["GET", "POST"])
+@login_required
+def new_issue():
+    if current_user.role == "viewer":
+        flash("You do not have permission to create issues.", "danger")
+        return redirect(url_for("main.issues_list"))
+
+    form = IssueForm()
+    if form.validate_on_submit():
+        issue = Issue(
+            title=form.title.data,
+            description=form.description.data,
+            status=form.status.data,
+            priority=form.priority.data,
+            category=form.category.data,
+            module=form.module.data if form.module.data else None,
+            version=form.version.data if form.version.data else None,
+            assigned_to=form.assigned_to.data if form.assigned_to.data and form.assigned_to.data != 0 else None,
+            due_date=form.due_date.data,
+            tags=form.tags.data,
+            created_by=current_user.id
+        )
+        db.session.add(issue)
+        db.session.commit()
+        flash("Issue created successfully!", "success")
+        return redirect(url_for("main.view_issue", issue_id=issue.id))
+
+    return render_template("issues/form.html", title="New Issue", form=form, issue=None)
+
+@bp.route("/issue/<int:issue_id>")
+@login_required
+def view_issue(issue_id):
+    issue = Issue.query.get_or_404(issue_id)
+    comments = issue.comments.order_by(Comment.created_at.asc()).all()
+    history = issue.history.order_by(IssueHistory.changed_at.desc()).all()
+    comment_form = CommentForm()
+    comment_form.issue_id.data = issue_id
+    return render_template("issues/view.html", 
+        title=f"Issue #{issue.id}",
+        issue=issue,
+        comments=comments,
+        history=history,
+        comment_form=comment_form,
+        statuses=ISSUE_STATUSES,
+        priorities=ISSUE_PRIORITIES,
+        categories=ISSUE_CATEGORIES,
+        modules=COMMON_MODULES
+    )
+
+@bp.route("/issue/<int:issue_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_issue(issue_id):
+    if current_user.role == "viewer":
+        flash("You do not have permission to edit issues.", "danger")
+        return redirect(url_for("main.view_issue", issue_id=issue_id))
+
+    issue = Issue.query.get_or_404(issue_id)
+    form = IssueForm(obj=issue)
+
+    if form.validate_on_submit():
+        log_history(issue, current_user, "title", issue.title, form.title.data)
+        log_history(issue, current_user, "description", issue.description, form.description.data)
+        log_history(issue, current_user, "status", issue.status, form.status.data)
+        log_history(issue, current_user, "priority", issue.priority, form.priority.data)
+        log_history(issue, current_user, "category", issue.category, form.category.data)
+        log_history(issue, current_user, "module", issue.module, form.module.data)
+        log_history(issue, current_user, "version", issue.version, form.version.data)
+        log_history(issue, current_user, "assigned_to", issue.assigned_to, form.assigned_to.data if form.assigned_to.data != 0 else None)
+        log_history(issue, current_user, "due_date", issue.due_date, form.due_date.data)
+        log_history(issue, current_user, "tags", issue.tags, form.tags.data)
+
+        issue.title = form.title.data
+        issue.description = form.description.data
+        issue.status = form.status.data
+        issue.priority = form.priority.data
+        issue.category = form.category.data
+        issue.module = form.module.data if form.module.data else None
+        issue.version = form.version.data if form.version.data else None
+        issue.assigned_to = form.assigned_to.data if form.assigned_to.data and form.assigned_to.data != 0 else None
+        issue.due_date = form.due_date.data
+        issue.tags = form.tags.data
+        issue.updated_at = datetime.utcnow()
+
+        if form.status.data == "Resolved" and issue.status != "Resolved":
+            issue.resolved_at = datetime.utcnow()
+        elif form.status.data != "Resolved" and issue.status == "Resolved":
+            issue.resolved_at = None
+
+        db.session.commit()
+        flash("Issue updated successfully!", "success")
+        return redirect(url_for("main.view_issue", issue_id=issue.id))
+
+    form.assigned_to.data = issue.assigned_to or 0
+    return render_template("issues/form.html", title=f"Edit Issue #{issue.id}", form=form, issue=issue)
+
+@bp.route("/issue/<int:issue_id>/delete", methods=["POST"])
+@login_required
+def delete_issue(issue_id):
+    if current_user.role != "admin":
+        flash("Only administrators can delete issues.", "danger")
+        return redirect(url_for("main.view_issue", issue_id=issue_id))
+
+    issue = Issue.query.get_or_404(issue_id)
+    db.session.delete(issue)
+    db.session.commit()
+    flash("Issue deleted successfully!", "success")
+    return redirect(url_for("main.issues_list"))
+
+@bp.route("/issue/<int:issue_id>/comment", methods=["POST"])
+@login_required
+def add_comment(issue_id):
+    issue = Issue.query.get_or_404(issue_id)
+    form = CommentForm()
+    if form.validate_on_submit():
+        comment = Comment(
+            issue_id=issue_id,
+            user_id=current_user.id,
+            content=form.content.data
+        )
+        db.session.add(comment)
+        db.session.commit()
+        flash("Comment added!", "success")
+    return redirect(url_for("main.view_issue", issue_id=issue_id))
+
+@bp.route("/users")
+@login_required
+def users_list():
+    if current_user.role != "admin":
+        flash("Access denied.", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    users = User.query.order_by(User.username).all()
+    return render_template("users/list.html", title="User Management", users=users)
+
+@bp.route("/user/new", methods=["GET", "POST"])
+@login_required
+def new_user():
+    if current_user.role != "admin":
+        flash("Access denied.", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    form = UserForm()
+    if form.validate_on_submit():
+        user = User(
+            username=form.username.data,
+            email=form.email.data,
+            role=form.role.data,
+            is_active=form.is_active.data == "true"
+        )
+        if form.password.data:
+            user.set_password(form.password.data)
+        else:
+            user.set_password("changeme123")
+        db.session.add(user)
+        db.session.commit()
+        flash("User created successfully!", "success")
+        return redirect(url_for("main.users_list"))
+
+    return render_template("users/form.html", title="New User", form=form, user=None)
+
+@bp.route("/user/<int:user_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_user(user_id):
+    if current_user.role != "admin":
+        flash("Access denied.", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    user = User.query.get_or_404(user_id)
+    form = UserForm(obj=user)
+    form.is_active.data = "true" if user.is_active else "false"
+
+    if form.validate_on_submit():
+        user.username = form.username.data
+        user.email = form.email.data
+        user.role = form.role.data
+        user.is_active = form.is_active.data == "true"
+        if form.password.data:
+            user.set_password(form.password.data)
+        db.session.commit()
+        flash("User updated successfully!", "success")
+        return redirect(url_for("main.users_list"))
+
+    return render_template("users/form.html", title=f"Edit User {user.username}", form=form, user=user)
+
+@bp.route("/import", methods=["GET", "POST"])
+@login_required
+def import_issues():
+    if current_user.role not in ["admin", "editor"]:
+        flash("You do not have permission to import issues.", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    form = ImportForm()
+    if form.validate_on_submit():
+        file = form.file.data[0]
+        if file and file.filename.endswith((".xlsx", ".xls")):
+            try:
+                df = pd.read_excel(file)
+                imported = 0
+                errors = []
+
+                for idx, row in df.iterrows():
+                    try:
+                        issue = Issue(
+                            title=str(row.get("Title", row.get("title", f"Issue {idx+1}"))),
+                            description=str(row.get("Description", row.get("description", ""))),
+                            status=str(row.get("Status", row.get("status", "Open"))),
+                            priority=str(row.get("Priority", row.get("priority", "Medium"))),
+                            category=str(row.get("Category", row.get("category", "Bug"))),
+                            module=str(row.get("Module", row.get("module", ""))) if pd.notna(row.get("Module", row.get("module", ""))) else None,
+                            version=str(row.get("Version", row.get("version", ""))) if pd.notna(row.get("Version", row.get("version", ""))) else None,
+                            tags=str(row.get("Tags", row.get("tags", ""))) if pd.notna(row.get("Tags", row.get("tags", ""))) else None,
+                            created_by=current_user.id
+                        )
+                        assignee_name = row.get("Assigned To", row.get("assigned_to", ""))
+                        if pd.notna(assignee_name) and str(assignee_name).strip():
+                            assignee = User.query.filter_by(username=str(assignee_name).strip()).first()
+                            if assignee:
+                                issue.assigned_to = assignee.id
+
+                        due_date = row.get("Due Date", row.get("due_date", ""))
+                        if pd.notna(due_date):
+                            try:
+                                issue.due_date = pd.to_datetime(due_date)
+                            except:
+                                pass
+
+                        db.session.add(issue)
+                        imported += 1
+                    except Exception as e:
+                        errors.append(f"Row {idx+1}: {str(e)}")
+
+                db.session.commit()
+                if imported > 0:
+                    flash(f"Successfully imported {imported} issues!", "success")
+                if errors:
+                    flash(f"Errors: {len(errors)} rows failed. Check logs.", "warning")
+                    for err in errors[:5]:
+                        flash(err, "danger")
+            except Exception as e:
+                flash(f"Error reading file: {str(e)}", "danger")
+        else:
+            flash("Please upload a valid Excel file (.xlsx or .xls)", "danger")
+        return redirect(url_for("main.import_issues"))
+
+    return render_template("import.html", title="Import Issues", form=form)
+
+@bp.route("/export")
+@login_required
+def export_issues():
+    if current_user.role not in ["admin", "editor"]:
+        flash("Access denied.", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    status_filter = request.args.get("status", "")
+    priority_filter = request.args.get("priority", "")
+    category_filter = request.args.get("category", "")
+    module_filter = request.args.get("module", "")
+    assignee_filter = request.args.get("assignee", "", type=int)
+    search = request.args.get("search", "")
+
+    query = Issue.query
+    if status_filter:
+        query = query.filter_by(status=status_filter)
+    if priority_filter:
+        query = query.filter_by(priority=priority_filter)
+    if category_filter:
+        query = query.filter_by(category=category_filter)
+    if module_filter:
+        query = query.filter_by(module=module_filter)
+    if assignee_filter:
+        query = query.filter_by(assigned_to=assignee_filter)
+    if search:
+        query = query.filter(
+            db.or_(
+                Issue.title.contains(search),
+                Issue.description.contains(search),
+                Issue.tags.contains(search)
+            )
+        )
+
+    issues = query.order_by(Issue.created_at.desc()).all()
+
+    data = []
+    for issue in issues:
+        data.append({
+            "ID": issue.id,
+            "Title": issue.title,
+            "Description": issue.description,
+            "Status": issue.status,
+            "Priority": issue.priority,
+            "Category": issue.category,
+            "Module": issue.module or "",
+            "Version": issue.version or "",
+            "Assigned To": issue.assignee.username if issue.assignee else "",
+            "Created By": issue.creator.username if issue.creator else "",
+            "Created At": issue.created_at.strftime("%Y-%m-%d %H:%M") if issue.created_at else "",
+            "Updated At": issue.updated_at.strftime("%Y-%m-%d %H:%M") if issue.updated_at else "",
+            "Resolved At": issue.resolved_at.strftime("%Y-%m-%d %H:%M") if issue.resolved_at else "",
+            "Due Date": issue.due_date.strftime("%Y-%m-%d") if issue.due_date else "",
+            "Tags": issue.tags or ""
+        })
+
+    df = pd.DataFrame(data)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Issues")
+    output.seek(0)
+
+    return send_file(output, 
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"ws_issues_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    )
+
+### 8. app/api.py
+
+from flask import Blueprint, jsonify, request
+from flask_login import login_required, current_user
+from app import db
+from app.models import Issue, User
+
+bp = Blueprint('api', __name__)
+
+@bp.route('/issues', methods=['GET'])
+@login_required
+def get_issues():
+    issues = Issue.query.order_by(Issue.created_at.desc()).all()
+    return jsonify([issue.to_dict() for issue in issues])
+
+@bp.route('/issues/<int:issue_id>', methods=['GET'])
+@login_required
+def get_issue(issue_id):
+    issue = Issue.query.get_or_404(issue_id)
+    return jsonify(issue.to_dict())
+
+@bp.route('/issues', methods=['POST'])
+@login_required
+def create_issue():
+    if current_user.role == 'viewer':
+        return jsonify({'error': 'Permission denied'}), 403
+
+    data = request.get_json()
+    issue = Issue(
+        title=data.get('title'),
+        description=data.get('description'),
+        status=data.get('status', 'Open'),
+        priority=data.get('priority', 'Medium'),
+        category=data.get('category', 'Bug'),
+        module=data.get('module'),
+        version=data.get('version'),
+        assigned_to=data.get('assigned_to'),
+        due_date=data.get('due_date'),
+        tags=data.get('tags'),
+        created_by=current_user.id
+    )
+    db.session.add(issue)
+    db.session.commit()
+    return jsonify(issue.to_dict()), 201
+
+@bp.route('/issues/<int:issue_id>', methods=['PUT'])
+@login_required
+def update_issue(issue_id):
+    if current_user.role == 'viewer':
+        return jsonify({'error': 'Permission denied'}), 403
+
+    issue = Issue.query.get_or_404(issue_id)
+    data = request.get_json()
+
+    for field in ['title', 'description', 'status', 'priority', 'category', 'module', 'version', 'assigned_to', 'due_date', 'tags']:
+        if field in data:
+            setattr(issue, field, data[field])
+
+    issue.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(issue.to_dict())
+
+@bp.route('/stats', methods=['GET'])
+@login_required
+def get_stats():
+    total = Issue.query.count()
+    by_status = {}
+    for s in ['Open', 'In Progress', 'In Review', 'Resolved', 'Closed', 'Reopened']:
+        by_status[s] = Issue.query.filter_by(status=s).count()
+
+    by_priority = {}
+    for p in ['Low', 'Medium', 'High', 'Critical']:
+        by_priority[p] = Issue.query.filter_by(priority=p).count()
+
+    return jsonify({
+        'total': total,
+        'by_status': by_status,
+        'by_priority': by_priority
+    })
+
+### 9. run.py (Main entry point)
+
+from app import create_app
+
+app = create_app()
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
+
+### 10. Templates - Create these directories and files:
+
+app/templates/base.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}WS Issue Dashboard{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm" {% if not current_user.is_authenticated %}style="display:none;"{% endif %}>
+        <div class="container-fluid">
+            <a class="navbar-brand fw-bold" href="{{ url_for('main.dashboard') }}">
+                <i class="bi bi-kanban me-2"></i>WS Issue Dashboard
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.dashboard') }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.issues_list') }}"><i class="bi bi-list-task me-1"></i>Issues</a>
+                    </li>
+                    {% if current_user.role in ['admin', 'editor'] %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.import_issues') }}"><i class="bi bi-upload me-1"></i>Import</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.export_issues') }}"><i class="bi bi-download me-1"></i>Export</a>
+                    </li>
+                    {% endif %}
+                    {% if current_user.role == 'admin' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.users_list') }}"><i class="bi bi-people me-1"></i>Users</a>
+                    </li>
+                    {% endif %}
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle me-1"></i>{{ current_user.username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><span class="dropdown-item-text">Role: {{ current_user.role.capitalize() }}</span></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}"><i class="bi bi-box-arrow-right me-2"></i>Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid main-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="container mt-3" style="max-width: 1200px;">
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer class="footer mt-auto py-3 bg-light border-top" {% if not current_user.is_authenticated %}style="display:none;"{% endif %}>
+        <div class="container-fluid text-center text-muted small">
+            WS Issue Dashboard &copy; 2024 Wondersoft
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
+
+app/templates/auth/login.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow">
+            <div class="card-body p-5">
+                <div class="text-center mb-4">
+                    <i class="bi bi-kanban text-primary" style="font-size: 3rem;"></i>
+                    <h3 class="mt-3">WS Issue Dashboard</h3>
+                    <p class="text-muted">Sign in to continue</p>
+                </div>
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.username.label(class="form-label") }}
+                        {{ form.username(class="form-control" + (" is-invalid" if form.username.errors else ""), placeholder="Username") }}
+                        {% for error in form.username.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.password.label(class="form-label") }}
+                        {{ form.password(class="form-control" + (" is-invalid" if form.password.errors else ""), placeholder="Password", type="password") }}
+                        {% for error in form.password.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.remember_me.label(class="form-label") }}
+                        {{ form.remember_me(class="form-select") }}
+                    </div>
+                    <div class="d-grid">
+                        {{ form.submit(class="btn btn-primary btn-lg") }}
+                    </div>
+                </form>
+                <div class="text-center mt-3 text-muted small">
+                    <p>Default login: <strong>admin</strong> / <strong>admin123</strong></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+app/templates/auth/register.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow">
+            <div class="card-body p-5">
+                <div class="text-center mb-4">
+                    <i class="bi bi-person-plus text-primary" style="font-size: 3rem;"></i>
+                    <h3 class="mt-3">Register</h3>
+                    <p class="text-muted">Create your account</p>
+                </div>
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.username.label(class="form-label") }}
+                        {{ form.username(class="form-control" + (" is-invalid" if form.username.errors else ""), placeholder="Username") }}
+                        {% for error in form.username.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.email.label(class="form-label") }}
+                        {{ form.email(class="form-control" + (" is-invalid" if form.email.errors else ""), placeholder="Email") }}
+                        {% for error in form.email.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.password.label(class="form-label") }}
+                        {{ form.password(class="form-control" + (" is-invalid" if form.password.errors else ""), placeholder="Password", type="password") }}
+                        {% for error in form.password.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.confirm_password.label(class="form-label") }}
+                        {{ form.confirm_password(class="form-control" + (" is-invalid" if form.confirm_password.errors else ""), placeholder="Confirm Password", type="password") }}
+                        {% for error in form.confirm_password.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="d-grid">
+                        {{ form.submit(class="btn btn-primary btn-lg") }}
+                    </div>
+                </form>
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('auth.login') }}">Already have an account? Sign in</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+app/templates/dashboard.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="bi bi-speedometer2 me-2"></i>Dashboard</h2>
+        <p class="text-muted">Welcome back, {{ current_user.username }}! Here's an overview of your issues.</p>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-3">
+        <div class="card stat-card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Total Issues</h6>
+                        <h2 class="mb-0">{{ total_issues }}</h2>
+                    </div>
+                    <i class="bi bi-list-task text-primary" style="font-size: 2.5rem; opacity: 0.3;"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-3">
+        <div class="card stat-card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Open</h6>
+                        <h2 class="mb-0 text-warning">{{ open_issues }}</h2>
+                    </div>
+                    <i class="bi bi-circle text-warning" style="font-size: 2.5rem; opacity: 0.3;"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-3">
+        <div class="card stat-card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">In Progress</h6>
+                        <h2 class="mb-0 text-info">{{ in_progress }}</h2>
+                    </div>
+                    <i class="bi bi-arrow-clockwise text-info" style="font-size: 2.5rem; opacity: 0.3;"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-3">
+        <div class="card stat-card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Overdue</h6>
+                        <h2 class="mb-0 text-danger">{{ overdue }}</h2>
+                    </div>
+                    <i class="bi bi-exclamation-triangle text-danger" style="font-size: 2.5rem; opacity: 0.3;"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Priority Breakdown -->
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-flag me-2"></i>Issues by Priority</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container" style="height: 250px;">
+                    <canvas id="priorityChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Breakdown -->
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-kanban me-2"></i>Issues by Status</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container" style="height: 250px;">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- My Assigned Issues -->
+    <div class="col-lg-7 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>My Assigned Issues</h5>
+                <a href="{{ url_for('main.issues_list', assignee=current_user.id) }}" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            <div class="card-body p-0">
+                {% if my_issues %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>ID</th>
+                                <th>Title</th>
+                                <th>Priority</th>
+                                <th>Status</th>
+                                <th>Due Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for issue in my_issues[:10] %}
+                            <tr>
+                                <td><a href="{{ url_for('main.view_issue', issue_id=issue.id) }}">#{{ issue.id }}</a></td>
+                                <td>{{ issue.title[:50] }}{% if issue.title|length > 50 %}...{% endif %}</td>
+                                <td><span class="badge bg-{{ 'danger' if issue.priority == 'Critical' else 'warning' if issue.priority == 'High' else 'info' if issue.priority == 'Medium' else 'secondary' }}">{{ issue.priority }}</span></td>
+                                <td><span class="badge bg-{{ 'warning' if issue.status == 'Open' else 'info' if issue.status == 'In Progress' else 'primary' if issue.status == 'In Review' else 'success' if issue.status == 'Resolved' else 'secondary' }}">{{ issue.status }}</span></td>
+                                <td>{% if issue.due_date %}{{ issue.due_date.strftime('%Y-%m-%d') }}{% if issue.due_date < now() %} <i class="bi bi-exclamation-circle text-danger"></i>{% endif %}{% else %}-{% endif %}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-check-circle" style="font-size: 3rem;"></i>
+                    <p class="mt-2">No assigned issues!</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Issues -->
+    <div class="col-lg-5 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Recent Issues</h5>
+                <a href="{{ url_for('main.issues_list') }}" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            <div class="card-body p-0">
+                {% if recent_issues %}
+                <div class="list-group list-group-flush">
+                    {% for issue in recent_issues %}
+                    <a href="{{ url_for('main.view_issue', issue_id=issue.id) }}" class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between">
+                            <h6 class="mb-1">#{{ issue.id }} - {{ issue.title[:40] }}{% if issue.title|length > 40 %}...{% endif %}</h6>
+                            <small class="text-muted">{{ issue.created_at.strftime('%m/%d %H:%M') }}</small>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-{{ 'danger' if issue.priority == 'Critical' else 'warning' if issue.priority == 'High' else 'info' if issue.priority == 'Medium' else 'secondary' }}">{{ issue.priority }}</span>
+                            <span class="badge bg-{{ 'warning' if issue.status == 'Open' else 'info' if issue.status == 'In Progress' else 'primary' if issue.status == 'In Review' else 'success' if issue.status == 'Resolved' else 'secondary' }}">{{ issue.status }}</span>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                    <p class="mt-2">No issues yet. <a href="{{ url_for('main.new_issue') }}">Create one</a>!</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Priority Chart
+    new Chart(document.getElementById('priorityChart'), {
+        type: 'doughnut',
+        data: {
+            labels: {{ priority_stats.keys()|list|tojson }},
+            datasets: [{
+                data: {{ priority_stats.values()|list|tojson }},
+                backgroundColor: ['#6c757d', '#0dcaf0', '#ffc107', '#dc3545'],
+                borderWidth: 0
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom' } } }
+    });
+
+    // Status Chart
+    new Chart(document.getElementById('statusChart'), {
+        type: 'doughnut',
+        data: {
+            labels: {{ status_stats.keys()|list|tojson }},
+            datasets: [{
+                data: {{ status_stats.values()|list|tojson }},
+                backgroundColor: ['#ffc107', '#0dcaf0', '#6610f2', '#198754', '#6c757d', '#fd7e14'],
+                borderWidth: 0
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom' } } }
+    });
+});
+</script>
+{% endblock %}
+
+app/templates/issues/list.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2><i class="bi bi-list-task me-2"></i>Issues</h2>
+        {% if current_user.role != 'viewer' %}
+        <a href="{{ url_for('main.new_issue') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>New Issue</a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Search</label>
+                <input type="text" name="search" class="form-control" placeholder="Title, description, tags..." value="{{ current_filters.search }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                    <option value="">All Statuses</option>
+                    {% for s in statuses %}
+                    <option value="{{ s }}" {% if current_filters.status == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Priority</label>
+                <select name="priority" class="form-select">
+                    <option value="">All Priorities</option>
+                    {% for p in priorities %}
+                    <option value="{{ p }}" {% if current_filters.priority == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Category</label>
+                <select name="category" class="form-select">
+                    <option value="">All Categories</option>
+                    {% for c in categories %}
+                    <option value="{{ c }}" {% if current_filters.category == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Module</label>
+                <select name="module" class="form-select">
+                    <option value="">All Modules</option>
+                    {% for m in modules %}
+                    <option value="{{ m }}" {% if current_filters.module == m %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">Filter</button>
+            </div>
+            <div class="col-md-12">
+                <a href="{{ url_for('main.issues_list') }}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Issues Table -->
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        {% if issues.items %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 60px;">ID</th>
+                        <th>Title</th>
+                        <th style="width: 120px;">Category</th>
+                        <th style="width: 120px;">Module</th>
+                        <th style="width: 100px;">Priority</th>
+                        <th style="width: 130px;">Status</th>
+                        <th style="width: 150px;">Assignee</th>
+                        <th style="width: 120px;">Due Date</th>
+                        <th style="width: 100px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for issue in issues.items %}
+                    <tr>
+                        <td><a href="{{ url_for('main.view_issue', issue_id=issue.id) }}" class="fw-bold">#{{ issue.id }}</a></td>
+                        <td>
+                            <a href="{{ url_for('main.view_issue', issue_id=issue.id) }}" class="text-decoration-none">
+                                {{ issue.title }}
+                            </a>
+                            {% if issue.description %}
+                            <div class="text-muted small">{{ issue.description[:100] }}{% if issue.description|length > 100 %}...{% endif %}</div>
+                            {% endif %}
+                        </td>
+                        <td><span class="badge bg-secondary">{{ issue.category }}</span></td>
+                        <td>{% if issue.module %}<span class="badge bg-light text-dark">{{ issue.module }}</span>{% else %}-{% endif %}</td>
+                        <td>
+                            <span class="badge bg-{{ 'danger' if issue.priority == 'Critical' else 'warning' if issue.priority == 'High' else 'info' if issue.priority == 'Medium' else 'secondary' }}">
+                                {{ issue.priority }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge bg-{{ 'warning' if issue.status == 'Open' else 'info' if issue.status == 'In Progress' else 'primary' if issue.status == 'In Review' else 'success' if issue.status == 'Resolved' else 'secondary' }}">
+                                {{ issue.status }}
+                            </span>
+                        </td>
+                        <td>{% if issue.assignee %}{{ issue.assignee.username }}{% else %}<span class="text-muted">Unassigned</span>{% endif %}</td>
+                        <td>
+                            {% if issue.due_date %}
+                                <span class="{{ 'text-danger fw-bold' if issue.due_date < now() and issue.status not in ['Closed', 'Resolved'] else '' }}">
+                                    {{ issue.due_date.strftime('%Y-%m-%d') }}
+                                </span>
+                            {% else %}-{% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <a href="{{ url_for('main.view_issue', issue_id=issue.id) }}" class="btn btn-outline-primary" title="View"><i class="bi bi-eye"></i></a>
+                                {% if current_user.role != 'viewer' %}
+                                <a href="{{ url_for('main.edit_issue', issue_id=issue.id) }}" class="btn btn-outline-secondary" title="Edit"><i class="bi bi-pencil"></i></a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if issues.pages > 1 %}
+        <nav class="px-3 py-2">
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                {% if issues.has_prev %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('main.issues_list', page=issues.prev_num, **current_filters) }}">Previous</a></li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                {% endif %}
+
+                {% for page_num in issues.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if page_num %}
+                        {% if page_num == issues.page %}
+                        <li class="page-item active"><span class="page-link">{{ page_num }}</span></li>
+                        {% else %}
+                        <li class="page-item"><a class="page-link" href="{{ url_for('main.issues_list', page=page_num, **current_filters) }}">{{ page_num }}</a></li>
+                        {% endif %}
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">...</span></li>
+                    {% endif %}
+                {% endfor %}
+
+                {% if issues.has_next %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('main.issues_list', page=issues.next_num, **current_filters) }}">Next</a></li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">Next</span></li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+        {% else %}
+        <div class="text-center py-5">
+            <i class="bi bi-inbox" style="font-size: 4rem; color: #dee2e6;"></i>
+            <h4 class="mt-3 text-muted">No issues found</h4>
+            {% if current_user.role != 'viewer' %}
+            <a href="{{ url_for('main.new_issue') }}" class="btn btn-primary mt-2"><i class="bi bi-plus-lg me-1"></i>Create First Issue</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+app/templates/issues/form.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2>{{ title }}</h2>
+        <p class="text-muted">{% if issue %}Edit issue #{{ issue.id }}{% else %}Create a new issue{% endif %}</p>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            {{ form.title.label(class="form-label") }}
+                            {{ form.title(class="form-control" + (" is-invalid" if form.title.errors else ""), placeholder="Issue title") }}
+                            {% for error in form.title.errors %}
+                                <div class="invalid-feedback">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            {{ form.description.label(class="form-label") }}
+                            {{ form.description(class="form-control", rows="4", placeholder="Detailed description") }}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            {{ form.status.label(class="form-label") }}
+                            {{ form.status(class="form-select" + (" is-invalid" if form.status.errors else "")) }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ form.priority.label(class="form-label") }}
+                            {{ form.priority(class="form-select" + (" is-invalid" if form.priority.errors else "")) }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ form.category.label(class="form-label") }}
+                            {{ form.category(class="form-select" + (" is-invalid" if form.category.errors else "")) }}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            {{ form.module.label(class="form-label") }}
+                            {{ form.module(class="form-select") }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.version.label(class="form-label") }}
+                            {{ form.version(class="form-control", placeholder="e.g., 1.2.3") }}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            {{ form.assigned_to.label(class="form-label") }}
+                            {{ form.assigned_to(class="form-select") }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.due_date.label(class="form-label") }}
+                            {{ form.due_date(class="form-control", type="date") }}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            {{ form.tags.label(class="form-label") }}
+                            {{ form.tags(class="form-control", placeholder="bug, frontend, urgent") }}
+                            <div class="form-text">Comma-separated tags</div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        {{ form.submit(class="btn btn-primary") }}
+                        <a href="{{ url_for('main.issues_list') }}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+app/templates/issues/view.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h2><i class="bi bi-ticket-detailed me-2"></i>Issue #{{ issue.id }}</h2>
+            <p class="text-muted mb-0">{{ issue.title }}</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            {% if current_user.role != 'viewer' %}
+            <a href="{{ url_for('main.edit_issue', issue_id=issue.id) }}" class="btn btn-outline-primary"><i class="bi bi-pencil me-1"></i>Edit</a>
+            {% endif %}
+            <a href="{{ url_for('main.issues_list') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back</a>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Main Issue Details -->
+    <div class="col-lg-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0">Details</h5>
+                <div class="d-flex gap-2 flex-wrap">
+                    <span class="badge bg-{{ 'danger' if issue.priority == 'Critical' else 'warning' if issue.priority == 'High' else 'info' if issue.priority == 'Medium' else 'secondary' }} fs-6">{{ issue.priority }}</span>
+                    <span class="badge bg-{{ 'warning' if issue.status == 'Open' else 'info' if issue.status == 'In Progress' else 'primary' if issue.status == 'In Review' else 'success' if issue.status == 'Resolved' else 'secondary' }} fs-6">{{ issue.status }}</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Category:</strong> <span class="badge bg-secondary ms-2">{{ issue.category }}</span>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Module:</strong> {% if issue.module %}<span class="badge bg-light text-dark ms-2">{{ issue.module }}</span>{% else %}<span class="text-muted ms-2">-</span>{% endif %}
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Version:</strong> {% if issue.version %}<span class="ms-2">{{ issue.version }}</span>{% else %}<span class="text-muted ms-2">-</span>{% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Assignee:</strong> {% if issue.assignee %}<span class="ms-2">{{ issue.assignee.username }}</span>{% else %}<span class="text-muted ms-2">Unassigned</span>{% endif %}
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Created by:</strong> <span class="ms-2">{{ issue.creator.username if issue.creator else 'Unknown' }}</span>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Created:</strong> <span class="ms-2">{{ issue.created_at.strftime('%Y-%m-%d %H:%M') if issue.created_at else '-' }}</span>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Updated:</strong> <span class="ms-2">{{ issue.updated_at.strftime('%Y-%m-%d %H:%M') if issue.updated_at else '-' }}</span>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Due Date:</strong> {% if issue.due_date %}<span class="ms-2 {{ 'text-danger fw-bold' if issue.due_date < now() and issue.status not in ['Closed', 'Resolved'] else '' }}">{{ issue.due_date.strftime('%Y-%m-%d') }}</span>{% else %}<span class="text-muted ms-2">-</span>{% endif %}
+                    </div>
+                </div>
+                {% if issue.tags %}
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Tags:</strong>
+                        <div class="d-flex flex-wrap gap-1 mt-1">
+                            {% for tag in issue.tags.split(',') %}
+                            <span class="badge bg-light text-dark">{{ tag.strip() }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                <hr>
+                <h6>Description</h6>
+                <div class="mt-2">
+                    {% if issue.description %}
+                    {{ issue.description|safe }}
+                    {% else %}
+                    <span class="text-muted">No description provided.</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Comments -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-chat me-2"></i>Comments ({{ comments|length }})</h5>
+            </div>
+            <div class="card-body">
+                {% if comments %}
+                <div class="mb-4">
+                    {% for comment in comments %}
+                    <div class="border-start border-3 border-primary ps-3 mb-3">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ comment.author.username }}</strong>
+                            <small class="text-muted">{{ comment.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                        </div>
+                        <div class="mt-1">{{ comment.content }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted">No comments yet.</p>
+                {% endif %}
+
+                <form method="POST" action="{{ url_for('main.add_comment') }}" novalidate>
+                    {{ comment_form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ comment_form.content.label(class="form-label") }}
+                        {{ comment_form.content(class="form-control", rows="3", placeholder="Add a comment...") }}
+                    </div>
+                    {{ comment_form.submit(class="btn btn-primary") }}
+                </form>
+            </div>
+        </div>
+
+        <!-- History -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>History</h5>
+            </div>
+            <div class="card-body p-0">
+                {% if history %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Date</th>
+                                <th>User</th>
+                                <th>Field</th>
+                                <th>Old Value</th>
+                                <th>New Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for h in history %}
+                            <tr>
+                                <td>{{ h.changed_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>{{ h.user.username if h.user else 'System' }}</td>
+                                <td>{{ h.field_name }}</td>
+                                <td><span class="text-muted">{{ h.old_value or '-' }}</span></td>
+                                <td><span class="fw-bold">{{ h.new_value or '-' }}</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">No history recorded.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-lg-4">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    {% if issue.status != 'In Progress' %}
+                    <form method="POST" action="{{ url_for('main.edit_issue', issue_id=issue.id) }}" style="display:inline;">
+                        <input type="hidden" name="status" value="In Progress">
+                        <button type="submit" class="btn btn-outline-info" formnovalidate><i class="bi bi-play me-1"></i>Start Work</button>
+                    </form>
+                    {% endif %}
+                    {% if issue.status != 'In Review' and issue.status != 'Resolved' %}
+                    <form method="POST" action="{{ url_for('main.edit_issue', issue_id=issue.id) }}" style="display:inline;">
+                        <input type="hidden" name="status" value="In Review">
+                        <button type="submit" class="btn btn-outline-primary" formnovalidate><i class="bi bi-eye me-1"></i>Submit for Review</button>
+                    </form>
+                    {% endif %}
+                    {% if issue.status != 'Resolved' %}
+                    <form method="POST" action="{{ url_for('main.edit_issue', issue_id=issue.id) }}" style="display:inline;">
+                        <input type="hidden" name="status" value="Resolved">
+                        <button type="submit" class="btn btn-outline-success" formnovalidate><i class="bi bi-check-circle me-1"></i>Mark Resolved</button>
+                    </form>
+                    {% endif %}
+                    {% if issue.status != 'Closed' %}
+                    <form method="POST" action="{{ url_for('main.edit_issue', issue_id=issue.id) }}" style="display:inline;">
+                        <input type="hidden" name="status" value="Closed">
+                        <button type="submit" class="btn btn-outline-secondary" formnovalidate><i class="bi bi-lock me-1"></i>Close Issue</button>
+                    </form>
+                    {% endif %}
+                    {% if issue.status == 'Closed' or issue.status == 'Resolved' %}
+                    <form method="POST" action="{{ url_for('main.edit_issue', issue_id=issue.id) }}" style="display:inline;">
+                        <input type="hidden" name="status" value="Reopened">
+                        <button type="submit" class="btn btn-outline-warning" formnovalidate><i class="bi bi-arrow-counterclockwise me-1"></i>Reopen</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-people me-2"></i>Assignment</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('main.edit_issue', issue_id=issue.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label">Reassign to</label>
+                        <select name="assigned_to" class="form-select">
+                            <option value="0">Unassigned</option>
+                            {% for user in users %}
+                            <option value="{{ user.id }}" {% if issue.assigned_to == user.id %}selected{% endif %}>{{ user.username }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-primary">Update Assignee</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+app/templates/import.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="bi bi-upload me-2"></i>Import Issues</h2>
+        <p class="text-muted">Upload an Excel file to import multiple issues at once.</p>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <form method="POST" enctype="multipart/form-data" novalidate>
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.file.label(class="form-label") }}
+                        {{ form.file(class="form-control" + (" is-invalid" if form.file.errors else "")) }}
+                        {% for error in form.file.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                        <div class="form-text">
+                            Supported format: .xlsx, .xls<br>
+                            Expected columns: Title, Description, Status, Priority, Category, Module, Version, Assigned To, Due Date, Tags
+                        </div>
+                    </div>
+
+                    <div class="card bg-light mb-3">
+                        <div class="card-body">
+                            <h6>Sample Excel Format</h6>
+                            <table class="table table-sm table-bordered mb-0">
+                                <thead class="table-light">
+                                    <tr><th>Column</th><th>Required</th><th>Example</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td>Title</td><td>Yes</td><td>Login page not loading</td></tr>
+                                    <tr><td>Description</td><td>No</td><td>Users cannot login after password reset</td></tr>
+                                    <tr><td>Status</td><td>No</td><td>Open, In Progress, Resolved, Closed</td></tr>
+                                    <tr><td>Priority</td><td>No</td><td>Low, Medium, High, Critical</td></tr>
+                                    <tr><td>Category</td><td>No</td><td>Bug, Feature Request, Enhancement</td></tr>
+                                    <tr><td>Module</td><td>No</td><td>Authentication, Dashboard, API</td></tr>
+                                    <tr><td>Version</td><td>No</td><td>1.2.3</td></tr>
+                                    <tr><td>Assigned To</td><td>No</td><td>john.doe (username)</td></tr>
+                                    <tr><td>Due Date</td><td>No</td><td>2024-12-31</td></tr>
+                                    <tr><td>Tags</td><td>No</td><td>bug, urgent, frontend</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        {{ form.submit(class="btn btn-primary") }}
+                        <a href="{{ url_for('main.issues_list') }}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+app/templates/users/list.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 d-flex justify-content-between align-items-center">
+        <h2><i class="bi bi-people me-2"></i>User Management</h2>
+        <a href="{{ url_for('main.new_user') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>New User</a>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Last Login</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td><strong>{{ user.username }}</strong></td>
+                        <td>{{ user.email }}</td>
+                        <td><span class="badge bg-{{ 'danger' if user.role == 'admin' else 'warning' if user.role == 'editor' else 'info' }}">{{ user.role.capitalize() }}</span></td>
+                        <td>{% if user.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+                        <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
+                        <td>{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Never' }}</td>
+                        <td>
+                            <a href="{{ url_for('main.edit_user', user_id=user.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+app/templates/users/form.html
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2>{{ title }}</h2>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.username.label(class="form-label") }}
+                        {{ form.username(class="form-control" + (" is-invalid" if form.username.errors else "")) }}
+                        {% for error in form.username.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.email.label(class="form-label") }}
+                        {{ form.email(class="form-control" + (" is-invalid" if form.email.errors else "")) }}
+                        {% for error in form.email.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.role.label(class="form-label") }}
+                        {{ form.role(class="form-select") }}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.is_active.label(class="form-label") }}
+                        {{ form.is_active(class="form-select") }}
+                    </div>
+
+                    <hr>
+                    <h6>Change Password</h6>
+                    <div class="mb-3">
+                        {{ form.password.label(class="form-label") }}
+                        {{ form.password(class="form-control", type="password") }}
+                        <div class="form-text">Leave blank to keep current password</div>
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.confirm_password.label(class="form-label") }}
+                        {{ form.confirm_password(class="form-control", type="password") }}
+                        {% for error in form.confirm_password.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        {{ form.submit(class="btn btn-primary") }}
+                        <a href="{{ url_for('main.users_list') }}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+### 11. Static Files
+
+app/static/css/style.css
+
+:root {
+    --primary-color: #0d6efd;
+    --sidebar-width: 260px;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.main-content {
+    flex: 1;
+    padding: 1.5rem;
+    margin-top: 56px; /* navbar height */
+}
+
+.stat-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+}
+
+.card {
+    border-radius: 0.75rem;
+    border: none;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.card-header {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    background-color: #fff;
+    border-radius: 0.75rem 0.75rem 0 0 !important;
+}
+
+.table th {
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6c757d;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.badge {
+    font-weight: 500;
+    padding: 0.35em 0.65em;
+}
+
+.btn {
+    border-radius: 0.5rem;
+    font-weight: 500;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+.navbar {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    z-index: 1030;
+}
+
+.nav-link {
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    margin: 0 0.125rem;
+    transition: all 0.2s;
+}
+
+.nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.nav-link.active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.footer {
+    margin-top: auto;
+}
+
+.chart-container {
+    position: relative;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+.card.shadow-sm {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075) !important;
+}
+
+@media (max-width: 768px) {
+    .main-content {
+        padding: 1rem;
+        margin-top: 56px;
+    }
+
+    .stat-card h2 {
+        font-size: 1.75rem;
+    }
+}
+
+/* Animation for cards */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card {
+    animation: fadeInUp 0.4s ease-out;
+}
+
+/* Table hover effects */
+.table-hover tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.03);
+}
+
+/* Priority badge colors */
+.badge.bg-danger { background-color: #dc3545 !important; }
+.badge.bg-warning { background-color: #ffc107 !important; color: #000 !important; }
+.badge.bg-info { background-color: #0dcaf0 !important; color: #000 !important; }
+.badge.bg-secondary { background-color: #6c757d !important; }
+.badge.bg-success { background-color: #198754 !important; }
+.badge.bg-primary { background-color: #0d6efd !important; }
+
+app/static/js/main.js
+
+// Global utility functions
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-dismiss alerts after 5 seconds
+    const alerts = document.querySelectorAll('.alert:not(.alert-permanent)');
+    alerts.forEach(alert => {
+        setTimeout(() => {
+            const bsAlert = new bootstrap.Alert(alert);
+            bsAlert.close();
+        }, 5000);
+    });
+
+    // Confirm delete actions
+    document.querySelectorAll('[data-confirm]').forEach(el => {
+        el.addEventListener('click', function(e) {
+            if (!confirm(this.dataset.confirm)) {
+                e.preventDefault();
+            }
+        });
+    });
+
+    // Form validation feedback
+    const forms = document.querySelectorAll('.needs-validation');
+    forms.forEach(form => {
+        form.addEventListener('submit', event => {
+            if (!form.checkValidity()) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            form.classList.add('was-validated');
+        });
+    });
+
+    // Tooltip initialization
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+
+    // Popover initialization
+    const popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
+    popoverTriggerList.map(function (popoverTriggerEl) {
+        return new bootstrap.Popover(popoverTriggerEl);
+    });
+});
+
+// Utility function for API calls
+async function apiCall(url, options = {}) {
+    const defaultOptions = {
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    };
+
+    const mergedOptions = { ...defaultOptions, ...options };
+    if (mergedOptions.body && typeof mergedOptions.body === 'object') {
+        mergedOptions.body = JSON.stringify(mergedOptions.body);
+    }
+
+    const response = await fetch(url, mergedOptions);
+
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Request failed' }));
+        throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+}
+
+// Show toast notification
+function showToast(message, type = 'info') {
+    const toastContainer = document.getElementById('toast-container') || createToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `toast align-items-center text-white bg-${type} border-0`;
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'assertive');
+    toast.setAttribute('aria-atomic', 'true');
+    toast.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">${message}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    `;
+    toastContainer.appendChild(toast);
+    const bsToast = new bootstrap.Toast(toast);
+    bsToast.show();
+    toast.addEventListener('hidden.bs.toast', () => toast.remove());
+}
+
+function createToastContainer() {
+    const container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+    container.style.zIndex = '1055';
+    document.body.appendChild(container);
+    return container;
+}

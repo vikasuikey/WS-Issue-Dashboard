@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WS Issue Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --primary: #2a78d6;
+            --primary-dark: #1e5fa0;
+            --sidebar-width: 280px;
+        }
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .sidebar {
+            position: fixed; top: 0; left: 0; height: 100vh; width: var(--sidebar-width);
+            background: #fff; border-right: 1px solid #e0e3e7; z-index: 1000;
+            display: flex; flex-direction: column; transition: transform 0.3s ease;
+        }
+        .sidebar-header { padding: 1.25rem; border-bottom: 1px solid #e0e3e7; }
+        .sidebar-header h4 { margin: 0; color: var(--primary); font-weight: 600; }
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 1rem; }
+        .filter-section { margin-bottom: 1.5rem; }
+        .filter-section label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: #6c757d; font-weight: 600; margin-bottom: 0.5rem; display: block; }
+        .filter-section select, .filter-section input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; background: #fff; }
+        .filter-section select:focus, .filter-section input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(42, 120, 214, 0.15); }
+        .main-content { margin-left: var(--sidebar-width); padding: 2rem; min-height: 100vh; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .stat-card { background: #fff; border: 1px solid #e0e3e7; border-radius: 10px; padding: 1.25rem; transition: box-shadow 0.2s; }
+        .stat-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .stat-card .stat-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; color: #fff; }
+        .stat-card .stat-value { font-size: 1.75rem; font-weight: 700; margin-top: 0.5rem; line-height: 1.2; }
+        .stat-card .stat-label { font-size: 0.8rem; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; }
+        .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .chart-card { background: #fff; border: 1px solid #e0e3e7; border-radius: 10px; padding: 1.25rem; }
+        .chart-card.full-width { grid-column: 1 / -1; }
+        .chart-card h5 { margin: 0 0 1rem; font-size: 0.95rem; font-weight: 600; color: #343a40; }
+        .chart-wrapper { position: relative; height: 300px; }
+        .table-card { background: #fff; border: 1px solid #e0e3e7; border-radius: 10px; overflow: hidden; }
+        .table-card .card-header { background: #f8f9fa; border-bottom: 1px solid #e0e3e7; padding: 1rem 1.25rem; font-weight: 600; }
+        .table-responsive { max-height: 500px; overflow-y: auto; }
+        .table th { position: sticky; top: 0; background: #f8f9fa; z-index: 10; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: #6c757d; font-weight: 600; padding: 0.75rem; }
+        .table td { padding: 0.75rem; font-size: 0.85rem; vertical-align: middle; border-color: #eef0f2; }
+        .table tr:hover td { background: #fafbfc; }
+        .badge-status { padding: 0.35rem 0.65rem; font-size: 0.7rem; border-radius: 20px; font-weight: 500; }
+        .badge-severity { padding: 0.35rem 0.65rem; font-size: 0.7rem; border-radius: 20px; font-weight: 500; }
+        .pagination { margin-bottom: 0; }
+        .page-link { color: var(--primary); border-color: #e0e3e7; padding: 0.5rem 0.75rem; }
+        .page-item.active .page-link { background: var(--primary); border-color: var(--primary); }
+        .btn-filter { background: var(--primary); color: #fff; border: none; }
+        .btn-filter:hover { background: var(--primary-dark); }
+        .btn-reset { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+        .btn-reset:hover { background: var(--primary); color: #fff; }
+        .mobile-toggle { display: none; position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1001; width: 56px; height: 56px; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; }
+        @media (max-width: 991.98px) {
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .main-content { margin-left: 0; }
+            .mobile-toggle { display: flex; }
+            .overlay.open { display: block; }
+            .chart-grid { grid-template-columns: 1fr; }
+        }
+        .severity-critical { background: #d03b3b; color: #fff; }
+        .severity-high { background: #ec835a; color: #fff; }
+        .severity-medium { background: #fab219; color: #212529; }
+        .severity-low { background: #0ca30c; color: #fff; }
+        .status-closed { background: #0ca30c; color: #fff; }
+        .status-resolved { background: #0ca30c; color: #fff; }
+        .status-in-progress { background: #fab219; color: #212529; }
+        .status-in-development { background: #fab219; color: #212529; }
+        .status-in-testing { background: #fab219; color: #212529; }
+        .status-in-production { background: #fab219; color: #212529; }
+        .status-open { background: #2a78d6; color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="overlay" id="sidebarOverlay"></div>
+    
+    <!-- Sidebar with Filters -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h4><i class="bi bi-funnel-fill me-2"></i>Filters</h4>
+        </div>
+        <div class="sidebar-content">
+            <form id="filterForm">
+                <div class="filter-section">
+                    <label>Search</label>
+                    <input type="text" name="search" id="searchInput" placeholder="Issue, description, ticket..." value="{{ request.args.get('search', '') }}">
+                </div>
+                <div class="filter-section">
+                    <label>Status</label>
+                    <select name="status" id="statusFilter">
+                        <option value="">All Statuses</option>
+                        {% for s in filters.statuses %}
+                        <option value="{{ s }}" {% if request.args.get('status') == s %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-section">
+                    <label>Severity</label>
+                    <select name="severity" id="severityFilter">
+                        <option value="">All Severities</option>
+                        {% for s in filters.severities %}
+                        <option value="{{ s }}" {% if request.args.get('severity') == s %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-section">
+                    <label>Integration Flow</label>
+                    <select name="integration" id="integrationFilter">
+                        <option value="">All Flows</option>
+                        {% for i in filters.integrations %}
+                        <option value="{{ i }}" {% if request.args.get('integration') == i %}selected{% endif %}>{{ i }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-section">
+                    <label>Responsible</label>
+                    <select name="responsible" id="responsibleFilter">
+                        <option value="">All</option>
+                        {% for r in filters.responsibles %}
+                        <option value="{{ r }}" {% if request.args.get('responsible') == r %}selected{% endif %}>{{ r }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-section">
+                    <label>Record Type</label>
+                    <select name="record_type" id="recordTypeFilter">
+                        <option value="">All Types</option>
+                        {% for rt in filters.record_types %}
+                        <option value="{{ rt }}" {% if request.args.get('record_type') == rt %}selected{% endif %}>{{ rt }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-filter"><i class="bi bi-search me-1"></i>Apply Filters</button>
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-reset"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</a>
+                </div>
+            </form>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="h3 mb-0">WS Issue Dashboard</h1>
+                <p class="text-muted mb-0">Interactive view of issues from Tracker Master</p>
+            </div>
+            <button class="btn btn-primary mobile-toggle" id="mobileToggle" aria-label="Toggle filters">
+                <i class="bi bi-funnel-fill fs-4"></i>
+            </button>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #2a78d6;"><i class="bi bi-list-ul"></i></div>
+                <div class="stat-value">{{ stats.total }}</div>
+                <div class="stat-label">Total Issues</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #d03b3b;"><i class="bi bi-exclamation-triangle"></i></div>
+                <div class="stat-value">{{ stats.open }}</div>
+                <div class="stat-label">Open Issues</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #fab219;"><i class="bi bi-hourglass-split"></i></div>
+                <div class="stat-value">{{ stats.in_progress }}</div>
+                <div class="stat-label">In Progress</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #0ca30c;"><i class="bi bi-check-circle"></i></div>
+                <div class="stat-value">{{ stats.closed }}</div>
+                <div class="stat-label">Closed/Resolved</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #6250d6;"><i class="bi bi-clock-history"></i></div>
+                <div class="stat-value">{{ stats.avg_delay }}</div>
+                <div class="stat-label">Avg Delay (days)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #e87ba4;"><i class="bi bi-arrow-up"></i></div>
+                <div class="stat-value">{{ stats.max_delay }}</div>
+                <div class="stat-label">Max Delay (days)</div>
+            </div>
+        </div>
+
+        <!-- Charts Row 1 -->
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h5><i class="bi bi-pie-chart-fill me-2"></i>Status Distribution</h5>
+                <div class="chart-wrapper">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h5><i class="bi bi-bar-chart-fill me-2"></i>Severity Breakdown</h5>
+                <div class="chart-wrapper">
+                    <canvas id="severityChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row 2 -->
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h5><i class="bi bi-diagram-3-fill me-2"></i>Top 10 Integration Flows</h5>
+                <div class="chart-wrapper">
+                    <canvas id="integrationChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h5><i class="bi bi-people-fill me-2"></i>Issues by Responsible</h5>
+                <div class="chart-wrapper">
+                    <canvas id="responsibleChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row 3 -->
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h5><i class="bi bi-tag-fill me-2"></i>Record Type Distribution</h5>
+                <div class="chart-wrapper">
+                    <canvas id="recordTypeChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card full-width">
+                <h5><i class="bi bi-graph-up me-2"></i>Monthly Trend (Issues Reported)</h5>
+                <div class="chart-wrapper" style="height: 350px;">
+                    <canvas id="monthlyChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Issues Table -->
+        <div class="table-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Issues ({{ stats.total }} total)</span>
+                <div class="d-flex gap-2">
+                    <select id="perPageSelect" class="form-select form-select-sm" style="width: auto;">
+                        <option value="20" {% if request.args.get('per_page') == '20' %}selected{% endif %}>20 per page</option>
+                        <option value="50" {% if request.args.get('per_page') == '50' %}selected{% endif %}>50 per page</option>
+                        <option value="100" {% if request.args.get('per_page') == '100' %}selected{% endif %}>100 per page</option>
+                    </select>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0" id="issuesTable">
+                    <thead>
+                        <tr>
+                            <th>S.No</th>
+                            <th>Date Reported</th>
+                            <th>Issue</th>
+                            <th>Integration Flow</th>
+                            <th>Impact</th>
+                            <th>Severity</th>
+                            <th>Ticket #</th>
+                            <th>Status</th>
+                            <th>Responsible</th>
+                            <th>Delay (days)</th>
+                            <th>Record Type</th>
+                        </tr>
+                    </thead>
+                    <tbody id="issuesTableBody">
+                        <!-- Populated via JS -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer bg-white border-top d-flex justify-content-between align-items-center py-3">
+                <div class="text-muted small" id="tableInfo">Showing 0 of 0 issues</div>
+                <nav aria-label="Pagination">
+                    <ul class="pagination pagination-sm mb-0" id="pagination">
+                        <!-- Populated via JS -->
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Chart data from server
+        const chartData = {{ charts | tojson }};
+        const stats = {{ stats | tojson }};
+        
+        // Color palette
+        const COLORS = {
+            categorical: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
+            status: { good: '#0ca30c', warning: '#fab219', serious: '#ec835a', critical: '#d03b3b' }
+        };
+
+        // Chart instances
+        let charts = {};
+
+        // Initialize all charts
+        function initCharts() {
+            // Status Chart (Doughnut)
+            charts.status = new Chart(document.getElementById('statusChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: chartData.status.labels,
+                    datasets: [{
+                        data: chartData.status.data,
+                        backgroundColor: chartData.status.colors,
+                        borderWidth: 0,
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { padding: 15, font: { size: 11 }, usePointStyle: true } },
+                        tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.raw} (${((ctx.raw / chartData.status.data.reduce((a,b)=>a+b,0))*100).toFixed(1)}%)` } }
+                    },
+                    cutout: '65%'
+                }
+            });
+
+            // Severity Chart (Bar)
+            charts.severity = new Chart(document.getElementById('severityChart'), {
+                type: 'bar',
+                data: {
+                    labels: chartData.severity.labels,
+                    datasets: [{
+                        label: 'Count',
+                        data: chartData.severity.data,
+                        backgroundColor: chartData.severity.colors,
+                        borderRadius: 6,
+                        maxBarThickness: 40
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { beginAtZero: true, grid: { display: false }, ticks: { font: { size: 11 } } },
+                        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                    }
+                }
+            });
+
+            // Integration Flow Chart (Bar)
+            charts.integration = new Chart(document.getElementById('integrationChart'), {
+                type: 'bar',
+                data: {
+                    labels: chartData.integration.labels,
+                    datasets: [{
+                        label: 'Count',
+                        data: chartData.integration.data,
+                        backgroundColor: chartData.integration.colors,
+                        borderRadius: 6,
+                        maxBarThickness: 40
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { beginAtZero: true, grid: { display: false }, ticks: { font: { size: 11 } } },
+                        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                    }
+                }
+            });
+
+            // Responsible Chart (Doughnut)
+            charts.responsible = new Chart(document.getElementById('responsibleChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: chartData.responsible.labels,
+                    datasets: [{
+                        data: chartData.responsible.data,
+                        backgroundColor: chartData.responsible.colors,
+                        borderWidth: 0,
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { padding: 15, font: { size: 11 }, usePointStyle: true } }
+                    },
+                    cutout: '65%'
+                }
+            });
+
+            // Record Type Chart (Doughnut)
+            charts.recordType = new Chart(document.getElementById('recordTypeChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: chartData.record_type.labels,
+                    datasets: [{
+                        data: chartData.record_type.data,
+                        backgroundColor: chartData.record_type.colors,
+                        borderWidth: 0,
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { padding: 15, font: { size: 11 }, usePointStyle: true } }
+                    },
+                    cutout: '65%'
+                }
+            });
+
+            // Monthly Trend Chart (Line)
+            charts.monthly = new Chart(document.getElementById('monthlyChart'), {
+                type: 'line',
+                data: {
+                    labels: chartData.monthly.labels,
+                    datasets: [{
+                        label: 'Issues Reported',
+                        data: chartData.monthly.data,
+                        fill: true,
+                        borderColor: '#2a78d6',
+                        backgroundColor: 'rgba(42, 120, 214, 0.1)',
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#2a78d6',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    interaction: { intersect: false, mode: 'index' },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+                        y: { beginAtZero: true, grid: { color: '#eef0f2' }, ticks: { font: { size: 11 }, stepSize: 1 } }
+                    }
+                }
+            });
+        }
+
+        // Severity badge class
+        function getSeverityClass(severity) {
+            const s = (severity || '').toLowerCase().trim();
+            if (s === 'critical') return 'severity-critical';
+            if (s === 'high') return 'severity-high';
+            if (s === 'medium') return 'severity-medium';
+            if (s === 'low') return 'severity-low';
+            return '';
+        }
+
+        // Status badge class
+        function getStatusClass(status) {
+            const s = (status || '').toLowerCase().replace(/\s+/g, '-');
+            return `status-${s}`;
+        }
+
+        // Load issues table via API
+        async function loadIssues(page = 1, perPage = 20) {
+            const params = new URLSearchParams(window.location.search);
+            params.set('page', page);
+            params.set('per_page', perPage);
+            
+            try {
+                const response = await fetch(`/api/issues?${params.toString()}`);
+                const data = await response.json();
+                renderTable(data);
+                renderPagination(data);
+            } catch (err) {
+                console.error('Failed to load issues:', err);
+            }
+        }
+
+        // Render table rows
+        function renderTable(data) {
+            const tbody = document.getElementById('issuesTableBody');
+            const info = document.getElementById('tableInfo');
+            
+            if (!data.issues || data.issues.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 text-muted">No issues found</td></tr>';
+                info.textContent = 'Showing 0 of 0 issues';
+                return;
+            }
+
+            tbody.innerHTML = data.issues.map(issue => `
+                <tr>
+                    <td>${issue.s_no}</td>
+                    <td>${issue.date_reported}</td>
+                    <td style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(issue.issue)}</td>
+                    <td>${escapeHtml(issue.integration_flow || '')}</td>
+                    <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(issue.impact || '')}</td>
+                    <td><span class="badge-severity ${getSeverityClass(issue.severity)}">${escapeHtml(issue.severity)}</span></td>
+                    <td>${escapeHtml(issue.ticket_number || '')}</td>
+                    <td><span class="badge-status ${getStatusClass(issue.status)}">${escapeHtml(issue.status)}</span></td>
+                    <td>${escapeHtml(issue.responsible || '')}</td>
+                    <td>${issue.delay_days !== null && issue.delay_days !== undefined ? issue.delay_days : '-'}</td>
+                    <td>${escapeHtml(issue.record_type || '')}</td>
+                </tr>
+            `).join('');
+
+            const start = (data.page - 1) * data.per_page + 1;
+            const end = Math.min(data.page * data.per_page, data.total);
+            info.textContent = `Showing ${start}–${end} of ${data.total} issues`;
+        }
+
+        // Render pagination
+        function renderPagination(data) {
+            const ul = document.getElementById('pagination');
+            const totalPages = data.total_pages;
+            const currentPage = data.page;
+            
+            if (totalPages <= 1) {
+                ul.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            
+            // Previous
+            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" data-page="${currentPage - 1}" aria-label="Previous"><i class="bi bi-chevron-left"></i></a>
+            </li>`;
+
+            // Page numbers
+            const maxVisible = 5;
+            let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+            let end = Math.min(totalPages, start + maxVisible - 1);
+            
+            if (end - start + 1 < maxVisible) {
+                start = Math.max(1, end - maxVisible + 1);
+            }
+
+            if (start > 1) {
+                html += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
+                if (start > 2) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+
+            for (let i = start; i <= end; i++) {
+                html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                    <a class="page-link" href="#" data-page="${i}">${i}</a>
+                </li>`;
+            }
+
+            if (end < totalPages) {
+                if (end < totalPages - 1) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                html += `<li class="page-item"><a class="page-link" href="#" data-page="${totalPages}">${totalPages}</a></li>`;
+            }
+
+            // Next
+            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" data-page="${currentPage + 1}" aria-label="Next"><i class="bi bi-chevron-right"></i></a>
+            </li>`;
+
+            ul.innerHTML = html;
+
+            // Add click handlers
+            ul.querySelectorAll('.page-link[data-page]').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const page = parseInt(link.dataset.page);
+                    if (!isNaN(page) && page !== currentPage) {
+                        loadIssues(page, parseInt(document.getElementById('perPageSelect').value));
+                    }
+                });
+            });
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Handle filter form submit
+        document.getElementById('filterForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const params = new URLSearchParams();
+            for (const [key, value] of formData.entries()) {
+                if (value) params.set(key, value);
+            }
+            window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+            loadIssues(1, parseInt(document.getElementById('perPageSelect').value));
+        });
+
+        // Handle per page change
+        document.getElementById('perPageSelect').addEventListener('change', () => {
+            loadIssues(1, parseInt(document.getElementById('perPageSelect').value));
+        });
+
+        // Mobile sidebar toggle
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        const mobileToggle = document.getElementById('mobileToggle');
+
+        mobileToggle.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('open');
+        });
+
+        overlay.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            overlay.classList.remove('open');
+        });
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            loadIssues(
+                parseInt(new URLSearchParams(window.location.search).get('page') || '1'),
+                parseInt(document.getElementById('perPageSelect').value)
+            );
+        });
+    </script>
+</body>
+</html>
