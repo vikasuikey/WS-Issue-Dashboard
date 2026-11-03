@@ -64,36 +64,39 @@ COLORS = {
 
 def load_tracker_data():
     """Load and parse data from Tracker Master sheet"""
-    wb = load_workbook(EXCEL_PATH, data_only=True)
-    ws = wb['Tracker Master']
+    wb = load_workbook(EXCEL_PATH, data_only=True, read_only=True)
+    try:
+        ws = wb['Tracker Master']
 
-    issues = []
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, values_only=True):
-        if row[0] is None:  # Skip empty rows
-            continue
+        issues = []
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, values_only=True):
+            if row[0] is None:  # Skip empty rows
+                continue
 
-        issue = {
-            's_no': row[0],
-            'date_reported': row[1],
-            'issue': row[2],
-            'description': row[3],
-            'integration_flow': row[4],
-            'impact': row[5],
-            'severity': str(row[6]).strip() if row[6] else 'Unknown',
-            'ticket_number': row[7],
-            'last_comments': row[8],
-            'root_cause': row[9],
-            'closure_note': row[10],
-            'closed_date': row[11],
-            'fixed_by': row[12],
-            'status': row[13],
-            'responsible': row[14],
-            'delay_days': row[15],
-            'record_type': row[16],
-        }
-        issues.append(issue)
+            issue = {
+                's_no': row[0],
+                'date_reported': row[1],
+                'issue': row[2],
+                'description': row[3],
+                'integration_flow': row[4],
+                'impact': row[5],
+                'severity': str(row[6]).strip() if row[6] else 'Unknown',
+                'ticket_number': row[7],
+                'last_comments': row[8],
+                'root_cause': row[9],
+                'closure_note': row[10],
+                'closed_date': row[11],
+                'fixed_by': row[12],
+                'status': row[13],
+                'responsible': row[14],
+                'delay_days': row[15],
+                'record_type': row[16],
+            }
+            issues.append(issue)
 
-    return issues
+        return issues
+    finally:
+        wb.close()
 
 def get_dashboard_stats(issues):
     """Calculate dashboard statistics"""
@@ -242,42 +245,45 @@ def save_meeting_notes(notes):
 def add_new_issue(issue_data):
     """Add a new issue to the Excel file"""
     with excel_lock:
-        wb = load_workbook(EXCEL_PATH)
-        ws = wb['Tracker Master']
-        
-        # Find next S.No
-        max_s_no = 0
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=1, values_only=True):
-            if row[0] is not None and isinstance(row[0], (int, float)):
-                max_s_no = max(max_s_no, int(row[0]))
-        
-        new_s_no = max_s_no + 1
-        
-        # Prepare new row data
-        new_row = [
-            new_s_no,
-            issue_data.get('date_reported', datetime.now()),
-            issue_data.get('issue', ''),
-            issue_data.get('description', ''),
-            issue_data.get('integration_flow', ''),
-            issue_data.get('impact', ''),
-            issue_data.get('severity', 'Medium'),
-            issue_data.get('ticket_number', ''),
-            issue_data.get('last_comments', ''),
-            issue_data.get('root_cause', ''),
-            issue_data.get('closure_note', ''),
-            issue_data.get('closed_date', None),
-            issue_data.get('fixed_by', ''),
-            issue_data.get('status', 'Open'),
-            issue_data.get('responsible', ''),
-            issue_data.get('delay_days', 0),
-            issue_data.get('record_type', 'Open Issue'),
-        ]
-        
-        ws.append(new_row)
-        wb.save(EXCEL_PATH)
-        
-        return new_s_no
+        with open(EXCEL_PATH, 'rb') as source:
+            wb = load_workbook(source)
+        try:
+            ws = wb['Tracker Master']
+
+            # Find next S.No
+            max_s_no = 0
+            for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=1, values_only=True):
+                if row[0] is not None and isinstance(row[0], (int, float)):
+                    max_s_no = max(max_s_no, int(row[0]))
+
+            new_s_no = max_s_no + 1
+
+            # Prepare new row data
+            new_row = [
+                new_s_no,
+                issue_data.get('date_reported', datetime.now()),
+                issue_data.get('issue', ''),
+                issue_data.get('description', ''),
+                issue_data.get('integration_flow', ''),
+                issue_data.get('impact', ''),
+                issue_data.get('severity', 'Medium'),
+                issue_data.get('ticket_number', ''),
+                issue_data.get('last_comments', ''),
+                issue_data.get('root_cause', ''),
+                issue_data.get('closure_note', ''),
+                issue_data.get('closed_date', None),
+                issue_data.get('fixed_by', ''),
+                issue_data.get('status', 'Open'),
+                issue_data.get('responsible', ''),
+                issue_data.get('delay_days', 0),
+                issue_data.get('record_type', 'Open Issue'),
+            ]
+
+            ws.append(new_row)
+            wb.save(EXCEL_PATH)
+            return new_s_no
+        finally:
+            wb.close()
 
 @app.route('/healthz')
 def healthz():
@@ -335,7 +341,8 @@ def dashboard():
             'integrations': integrations,
             'responsibles': responsibles,
             'record_types': record_types,
-        }
+        },
+        entry_added=request.args.get('entry_added') == '1',
     )
 
 @app.route('/api/issues')
@@ -421,42 +428,58 @@ def api_stats():
 
 @app.route('/api/add_issue', methods=['POST'])
 def api_add_issue():
-    """API endpoint to add a new issue"""
+    """API endpoint to add a new issue, requirement, or enhancement"""
     try:
-        data = request.get_json()
-        
-        # Validate required fields
-        required_fields = ['issue', 'record_type']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({'success': False, 'error': f'Missing required field: {field}'}), 400
-        
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'success': False, 'error': 'Request body must be a JSON object'}), 400
+
+        issue = data.get('issue')
+        record_type = data.get('record_type')
+        if not isinstance(issue, str) or not issue.strip():
+            return jsonify({'success': False, 'error': 'Issue/title is required'}), 400
+        if not isinstance(record_type, str) or not record_type.strip():
+            return jsonify({'success': False, 'error': 'Record type is required'}), 400
+
+        record_type = record_type.strip()
+        if record_type not in {'Issue', 'Requirement', 'Enhancement'}:
+            return jsonify({'success': False, 'error': 'Unsupported record type'}), 400
+
+        optional_fields = (
+            'description', 'integration_flow', 'impact', 'severity',
+            'ticket_number', 'last_comments', 'status', 'responsible',
+        )
+        for field in optional_fields:
+            value = data.get(field)
+            if value is not None and not isinstance(value, str):
+                return jsonify({'success': False, 'error': f'{field} must be text'}), 400
+
         # Set defaults
         issue_data = {
             'date_reported': datetime.now(),
-            'issue': data.get('issue'),
-            'description': data.get('description', ''),
-            'integration_flow': data.get('integration_flow', ''),
-            'impact': data.get('impact', ''),
-            'severity': data.get('severity', 'Medium'),
-            'ticket_number': data.get('ticket_number', ''),
-            'last_comments': data.get('last_comments', ''),
+            'issue': issue.strip(),
+            'description': data.get('description') or '',
+            'integration_flow': data.get('integration_flow') or '',
+            'impact': data.get('impact') or '',
+            'severity': data.get('severity') or 'Medium',
+            'ticket_number': data.get('ticket_number') or '',
+            'last_comments': data.get('last_comments') or '',
             'root_cause': '',
             'closure_note': '',
             'closed_date': None,
             'fixed_by': '',
-            'status': data.get('status', 'Open'),
-            'responsible': data.get('responsible', ''),
+            'status': data.get('status') or 'Open',
+            'responsible': data.get('responsible') or '',
             'delay_days': 0,
-            'record_type': data.get('record_type'),
+            'record_type': record_type,
         }
-        
+
         new_s_no = add_new_issue(issue_data)
-        
+
         return jsonify({
             'success': True,
             's_no': new_s_no,
-            'message': 'Issue added successfully'
+            'message': 'Record added successfully'
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
