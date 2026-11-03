@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>WS Issue Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
@@ -150,9 +151,18 @@
                 <h1 class="h3 mb-0">WS Issue Dashboard</h1>
                 <p class="text-muted mb-0">Interactive view of issues from Tracker Master</p>
             </div>
-            <button class="btn btn-primary mobile-toggle" id="mobileToggle" aria-label="Toggle filters">
-                <i class="bi bi-funnel-fill fs-4"></i>
-            </button>
+            <div class="d-flex align-items-center gap-2">
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-outline-secondary" type="submit">Sign out</button>
+                </form>
+                <button class="btn btn-primary mobile-toggle" id="mobileToggle" aria-label="Toggle filters">
+                    <i class="bi bi-funnel-fill fs-4"></i>
+                </button>
+            </div>
+        </div>
+        <div class="alert alert-warning py-2" role="note">
+            Demo hosting uses temporary storage. Issue and meeting-note edits may be lost when the service restarts or redeploys.
         </div>
 
         <!-- Stats Cards -->
@@ -286,7 +296,17 @@
         // Chart data from server
         const chartData = {{ charts | tojson }};
         const stats = {{ stats | tojson }};
-        
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+        function dashboardFetch(url, options = {}) {
+            const method = (options.method || 'GET').toUpperCase();
+            const headers = new Headers(options.headers || {});
+            if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                headers.set('X-CSRFToken', csrfToken);
+            }
+            return fetch(url, { ...options, headers });
+        }
+
         // Color palette
         const COLORS = {
             categorical: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
@@ -470,7 +490,7 @@
             params.set('per_page', perPage);
             
             try {
-                const response = await fetch(`/api/issues?${params.toString()}`);
+                const response = await dashboardFetch(`/api/issues?${params.toString()}`);
                 const data = await response.json();
                 renderTable(data);
                 renderPagination(data);

@@ -3,14 +3,32 @@ WS Issue Dashboard - Flask Application
 Reads data from Open_Issues_Wondersoft.xlsx and displays an interactive dashboard
 """
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, redirect, session, url_for
+from flask_wtf.csrf import CSRFProtect
 from openpyxl import load_workbook
 from datetime import datetime
-import os
+import hmac
 import json
+import os
 import threading
 
 app = Flask(__name__)
+secret_key = os.environ.get('SECRET_KEY')
+if not secret_key:
+    raise RuntimeError('SECRET_KEY must be configured before starting the dashboard')
+
+app.config.update(
+    SECRET_KEY=secret_key,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true',
+)
+csrf = CSRFProtect(app)
+
+DASHBOARD_USERNAME = os.environ.get('DASHBOARD_USERNAME', '')
+DASHBOARD_PASSWORD = os.environ.get('DASHBOARD_PASSWORD', '')
+if not DASHBOARD_USERNAME or not DASHBOARD_PASSWORD:
+    raise RuntimeError('DASHBOARD_USERNAME and DASHBOARD_PASSWORD must be configured')
 
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), 'Open_Issues_Wondersoft.xlsx')
 MEETING_NOTES_PATH = os.path.join(os.path.dirname(__file__), 'meeting_notes.json')
@@ -261,6 +279,38 @@ def add_new_issue(issue_data):
         
         return new_s_no
 
+@app.route('/healthz')
+def healthz():
+    return jsonify({'status': 'ok'})
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        if hmac.compare_digest(username, DASHBOARD_USERNAME) and hmac.compare_digest(password, DASHBOARD_PASSWORD):
+            session.clear()
+            session['authenticated'] = True
+            return redirect(url_for('dashboard'))
+        return render_template('login.html', error='Invalid username or password'), 401
+
+    return render_template('login.html')
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.before_request
+def require_login():
+    if request.endpoint in {'healthz', 'login', 'static'}:
+        return None
+    if session.get('authenticated'):
+        return None
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Authentication required'}), 401
+    return redirect(url_for('login'))
+
 @app.route('/')
 def dashboard():
     issues = load_tracker_data()
@@ -465,4 +515,4 @@ def api_delete_meeting_note(date):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=False, host='127.0.0.1', port=5001)
