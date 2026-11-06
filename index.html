@@ -103,7 +103,7 @@
     }
     .notice strong { color: var(--ink); }
     .notice-mark { color: var(--blue-dark); font-weight: 800; }
-    .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
     .kpi {
       min-height: 118px;
       padding: 17px 17px 15px;
@@ -112,6 +112,7 @@
       border-radius: 7px;
       box-shadow: var(--shadow);
     }
+    .kpi-primary { border-top: 3px solid var(--blue); }
     .kpi-label { display: block; color: var(--muted); font-size: 12px; }
     .kpi-value { display: block; margin-top: 12px; font-size: clamp(25px, 3vw, 34px); line-height: 1; letter-spacing: -.045em; font-weight: 720; font-variant-numeric: proportional-nums; }
     .kpi-unit { margin-left: 5px; color: var(--muted); font-size: 12px; font-weight: 500; letter-spacing: 0; }
@@ -279,6 +280,8 @@
 
     function renderKpis(summary) {
       const specs = [
+        ['Open issues', summary.open_issues, ''],
+        ['Open requirements / enhancements', summary.open_requirements_enhancements, ''],
         ['Total records', summary.total, ''],
         ['Open', summary.open, ''],
         ['In progress', summary.in_progress, ''],
@@ -288,8 +291,8 @@
       ];
       const target = document.getElementById('kpis');
       target.replaceChildren();
-      specs.forEach(([label, value, unit]) => {
-        const card = element('article', 'kpi');
+      specs.forEach(([label, value, unit], index) => {
+        const card = element('article', index < 2 ? 'kpi kpi-primary' : 'kpi');
         card.append(element('span', 'kpi-label', label));
         const number = element('strong', 'kpi-value', String(value ?? 0));
         if (unit) number.append(element('span', 'kpi-unit', unit));
