@@ -1,5 +1,4 @@
 import json
-import os
 import tempfile
 import unittest
 from datetime import datetime
@@ -69,6 +68,8 @@ class PublicDashboardExportTests(unittest.TestCase):
         self.assertEqual(data['summary'], {
             'total': 4,
             'open': 3,
+            'open_issues': 1,
+            'open_requirements_enhancements': 2,
             'closed': 1,
             'in_progress': 1,
             'avg_delay': 3.3,
@@ -83,6 +84,7 @@ class PublicDashboardExportTests(unittest.TestCase):
         self.assertEqual(data['record_type_counts']['Issue'], 1)
         self.assertEqual(data['record_type_counts']['Requirement'], 1)
         self.assertEqual(data['record_type_counts']['Enhancement'], 1)
+        self.assertEqual(data['record_type_counts']['Requirement / Enhancement'], 0)
         self.assertEqual(data['record_type_counts']['Other'], 1)
         self.assertEqual(data['monthly_trend'], [
             {'month': '2026-01', 'count': 1},
@@ -104,7 +106,37 @@ class PublicDashboardExportTests(unittest.TestCase):
             'issue', 'description', 'integration_flow', 'impact', 'ticket_number',
             'last_comments', 'root_cause', 'closure_note', 'fixed_by', 'responsible',
         ):
-            self.assertNotIn(private_key, serialized)
+            self.assertNotIn(f'"{private_key}"', serialized)
+
+    def test_open_summary_counts_match_excel_categories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workbook_path = Path(temp_dir) / 'tracker.xlsx'
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = 'Tracker Master'
+            worksheet.append(HEADERS)
+            for serial, status, record_type in (
+                (1, 'Open', 'Open Issue'),
+                (2, 'Closed', 'Open Issue'),
+                (3, 'In Progress', 'Requirement / Enhancement'),
+                (4, 'Resolved', 'Requirement / Enhancement'),
+                (5, 'Closed', 'Requirement / Enhancement'),
+                (6, 'Resolved', 'Issue'),
+                (7, 'In Testing', 'Enhancement'),
+            ):
+                row = [None] * len(HEADERS)
+                row[0] = serial
+                row[13] = status
+                row[16] = record_type
+                worksheet.append(row)
+            workbook.save(workbook_path)
+            workbook.close()
+
+            data = export_public_summary(workbook_path, Path(temp_dir) / 'summary.json')
+
+        self.assertEqual(data['summary']['open_issues'], 2)
+        self.assertEqual(data['summary']['open_requirements_enhancements'], 3)
+        self.assertEqual(data['record_type_counts']['Requirement / Enhancement'], 3)
 
     def test_fails_when_required_aggregate_columns_are_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:

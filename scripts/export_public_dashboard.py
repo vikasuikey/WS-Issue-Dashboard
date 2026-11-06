@@ -20,9 +20,11 @@ STATUS_LABELS = (
     'Other',
 )
 SEVERITY_LABELS = ('Critical', 'High', 'Medium', 'Low', 'Other')
-RECORD_TYPE_LABELS = ('Issue', 'Requirement', 'Enhancement', 'Other')
+RECORD_TYPE_LABELS = ('Issue', 'Requirement', 'Enhancement', 'Requirement / Enhancement', 'Other')
 IN_PROGRESS_STATUSES = {'in progress', 'in development', 'in testing', 'in production'}
 CLOSED_STATUSES = {'closed', 'resolved'}
+OPEN_ISSUE_RECORD_TYPES = {'issue', 'open issue'}
+OPEN_ENHANCEMENT_RECORD_TYPES = {'enhancement', 'requirement', 'requirement / enhancement'}
 
 
 def _normalized_label(value, allowed, aliases=None):
@@ -85,6 +87,8 @@ def build_public_summary(workbook_path):
             raise ValueError('Tracker Master is missing required aggregate columns')
 
         total = 0
+        open_issues = 0
+        open_requirements_enhancements = 0
         status_counts = Counter()
         severity_counts = Counter()
         record_type_counts = Counter()
@@ -97,13 +101,21 @@ def build_public_summary(workbook_path):
                 continue
 
             total += 1
-            status = _normalized_label(row[columns['Status']], STATUS_LABELS)
+            raw_status = str(row[columns['Status']] or '').strip().casefold()
+            raw_record_type = str(row[columns['Record Type']] or '').strip().casefold()
+            status = _normalized_label(raw_status, STATUS_LABELS)
             severity = _normalized_label(row[columns['Severity']], SEVERITY_LABELS)
             record_type = _normalized_label(
-                row[columns['Record Type']],
+                raw_record_type,
                 RECORD_TYPE_LABELS,
                 aliases={'open issue': 'Issue'},
             )
+            if raw_status != 'closed':
+                if raw_record_type in OPEN_ISSUE_RECORD_TYPES:
+                    open_issues += 1
+                elif raw_record_type in OPEN_ENHANCEMENT_RECORD_TYPES:
+                    open_requirements_enhancements += 1
+
             status_counts[status] += 1
             severity_counts[severity] += 1
             record_type_counts[record_type] += 1
@@ -127,6 +139,8 @@ def build_public_summary(workbook_path):
             'summary': {
                 'total': total,
                 'open': total - closed_count,
+                'open_issues': open_issues,
+                'open_requirements_enhancements': open_requirements_enhancements,
                 'closed': closed_count,
                 'in_progress': in_progress_count,
                 'avg_delay': avg_delay,
