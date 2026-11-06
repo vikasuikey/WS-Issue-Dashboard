@@ -1,200 +1,181 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f4f6f9">
-  <meta name="description" content="A clear view of Wondersoft integration issues, requirements, and enhancements.">
+  <meta name="description" content="Public aggregate view of Wondersoft issue tracking activity.">
   <title>WS Issue Dashboard</title>
   <style>
     :root {
       color-scheme: light;
-      --paper: #f4f6f9;
-      --white: #fff;
+      --page: #f4f6f9;
+      --surface: #fff;
+      --surface-soft: #edf2f7;
       --ink: #172b42;
       --muted: #596b7f;
+      --subtle: #7b8998;
       --line: #d9e1e9;
       --blue: #2a78d6;
-      --blue-deep: #1e5fa0;
-      --mint: #1baf7a;
-      --amber: #eda100;
-      --display: Georgia, "Times New Roman", serif;
-      --body: "Segoe UI", system-ui, -apple-system, sans-serif;
+      --blue-dark: #1e5fa0;
+      --blue-pale: #e0edfb;
+      --green: #0c7a54;
+      --focus: #eda100;
+      --shadow: 0 8px 24px rgba(23, 43, 66, .045);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
     }
-
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --page: #101923;
+      --surface: #182532;
+      --surface-soft: #223342;
+      --ink: #edf3f8;
+      --muted: #bac8d5;
+      --subtle: #90a3b5;
+      --line: #344655;
+      --blue: #3987e5;
+      --blue-dark: #8fc0f3;
+      --blue-pale: #203c58;
+      --green: #69d0a7;
+      --focus: #f3c65d;
+      --shadow: 0 8px 24px rgba(0, 0, 0, .16);
+    }
     * { box-sizing: border-box; }
-    html { min-width: 320px; background: var(--paper); }
-    body {
-      margin: 0;
-      color: var(--ink);
-      font: 16px/1.55 var(--body);
-      background:
-        linear-gradient(90deg, transparent 0 7.8%, rgba(42, 120, 214, .045) 7.8% 7.9%, transparent 7.9%),
-        var(--paper);
+    body { margin: 0; color: var(--ink); background: var(--page); line-height: 1.5; }
+    button { font: inherit; }
+    button:focus-visible, summary:focus-visible, a:focus-visible, [tabindex="0"]:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 3px;
     }
-    a { color: inherit; }
-    a:focus-visible { outline: 3px solid var(--amber); outline-offset: 4px; }
-
-    .wrap { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
+    .shell { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
     .topbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      min-height: 82px;
+      min-height: 76px;
       border-bottom: 1px solid var(--line);
     }
-    .brand { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; }
+    .brand { display: flex; align-items: center; gap: 11px; }
     .brand-mark {
       display: grid;
-      width: 34px;
-      height: 34px;
+      width: 35px;
+      height: 35px;
       place-items: center;
-      color: var(--white);
-      font-size: 13px;
-      font-weight: 750;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
       letter-spacing: -.04em;
-      background: var(--blue-deep);
+      background: var(--blue-dark);
       border-radius: 9px 9px 9px 2px;
     }
     .brand-name { font-size: 14px; font-weight: 700; letter-spacing: -.015em; }
-    .top-note { color: var(--muted); font-size: 13px; }
-
-    main { padding: 76px 0 62px; }
-    .hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.15fr) minmax(290px, .85fr);
-      align-items: center;
-      gap: clamp(40px, 8vw, 112px);
-      padding-bottom: 72px;
-    }
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 9px;
-      margin: 0 0 22px;
-      color: var(--blue-deep);
-      font-size: 13px;
-      font-weight: 700;
-    }
-    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); }
-    h1 {
-      max-width: 650px;
-      margin: 0;
-      font: 500 clamp(46px, 6.5vw, 78px)/.99 var(--display);
-      letter-spacing: -.055em;
-    }
-    .intro { max-width: 510px; margin: 24px 0 30px; color: var(--muted); font-size: 17px; }
-    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
-    .button {
-      display: inline-flex;
-      min-height: 48px;
-      align-items: center;
-      justify-content: center;
-      padding: 0 19px;
-      color: var(--white);
-      font-size: 14px;
-      font-weight: 700;
-      text-decoration: none;
-      background: var(--blue-deep);
-      border: 1px solid var(--blue-deep);
-      border-radius: 5px;
-      transition: background-color .15s ease, transform .15s ease;
-    }
-    .button:hover { background: #174b7e; transform: translateY(-1px); }
-    .text-link { color: var(--blue-deep); font-size: 14px; font-weight: 650; text-decoration-thickness: 1px; text-underline-offset: 4px; }
-
-    .map-panel {
-      position: relative;
-      min-height: 318px;
-      padding: 24px;
-      overflow: hidden;
-      background: #e8eff6;
-      border: 1px solid #d5e0eb;
-      border-radius: 7px;
-    }
-    .map-panel::before, .map-panel::after {
-      position: absolute;
-      content: "";
-      pointer-events: none;
-    }
-    .map-panel::before {
-      inset: 0;
-      opacity: .48;
-      background-image: linear-gradient(rgba(42,120,214,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(42,120,214,.12) 1px, transparent 1px);
-      background-size: 31px 31px;
-      mask-image: linear-gradient(130deg, #000 5%, transparent 90%);
-    }
-    .map-panel::after {
-      width: 220px;
-      height: 220px;
-      right: -62px;
-      bottom: -98px;
-      border: 1px solid rgba(30,95,160,.23);
-      border-radius: 50%;
-      box-shadow: 0 0 0 23px rgba(30,95,160,.04), 0 0 0 48px rgba(30,95,160,.04), 0 0 0 73px rgba(30,95,160,.04);
-    }
-    .panel-heading { position: relative; z-index: 1; display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
-    .panel-heading strong { color: var(--ink); font-size: 13px; }
-    .flow-lines { position: absolute; inset: 58px 24px 24px; z-index: 1; }
-    .flow-lines svg { width: 100%; height: 100%; overflow: visible; }
-    .flow-lines path { fill: none; stroke: #7aa9d4; stroke-width: 1.5; stroke-dasharray: 4 5; }
-    .node {
-      position: absolute;
-      z-index: 2;
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      padding: 10px 12px;
+    .top-actions { display: flex; align-items: center; gap: 16px; }
+    .public-label { color: var(--muted); font-size: 12px; }
+    .public-label::before { display: inline-block; width: 7px; height: 7px; margin: 0 7px 1px 0; content: ""; background: var(--green); border-radius: 50%; }
+    .theme-toggle {
+      min-height: 36px;
+      padding: 0 11px;
       color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      cursor: pointer;
       font-size: 12px;
       font-weight: 650;
-      background: var(--white);
-      border: 1px solid #d2deea;
-      border-radius: 5px;
-      box-shadow: 0 5px 14px rgba(23,43,66,.06);
     }
-    .node::before { width: 8px; height: 8px; flex: 0 0 auto; content: ""; border-radius: 2px; background: var(--blue); }
-    .node-a { top: 28%; left: 9%; }
-    .node-b { top: 53%; left: 34%; }
-    .node-c { top: 28%; right: 8%; }
-    .node-b::before { background: var(--amber); }
-    .node-c::before { background: var(--mint); }
-    .panel-caption { position: absolute; z-index: 2; right: 23px; bottom: 18px; color: var(--muted); font-size: 11px; }
 
-    .guide {
-      display: grid;
-      grid-template-columns: .78fr 1.22fr;
-      gap: 48px;
-      padding: 30px 0 32px;
-      border-top: 1px solid var(--line);
-    }
-    .guide h2 { margin: 0; font: 500 28px/1.15 var(--display); letter-spacing: -.025em; }
-    .guide-copy { max-width: 620px; margin: 0; color: var(--muted); font-size: 15px; }
-    .guide-copy strong { color: var(--ink); font-weight: 700; }
-    .footer {
+    main { padding: 48px 0 54px; }
+    .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+    .page-heading h1 { margin: 0; font-size: clamp(28px, 4vw, 43px); line-height: 1.1; letter-spacing: -.045em; font-weight: 680; }
+    .page-heading p { max-width: 620px; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+    .updated { flex: 0 0 auto; color: var(--muted); font-size: 12px; text-align: right; }
+
+    .notice {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-      padding: 21px 0 30px;
+      align-items: flex-start;
+      gap: 11px;
+      margin: 0 0 22px;
+      padding: 13px 15px;
       color: var(--muted);
+      background: var(--blue-pale);
+      border-left: 3px solid var(--blue);
       font-size: 12px;
-      border-top: 1px solid var(--line);
     }
-    .footer a { color: var(--blue-deep); text-underline-offset: 3px; }
+    .notice strong { color: var(--ink); }
+    .notice-mark { color: var(--blue-dark); font-weight: 800; }
+    .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .kpi {
+      min-height: 118px;
+      padding: 17px 17px 15px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      box-shadow: var(--shadow);
+    }
+    .kpi-label { display: block; color: var(--muted); font-size: 12px; }
+    .kpi-value { display: block; margin-top: 12px; font-size: clamp(25px, 3vw, 34px); line-height: 1; letter-spacing: -.045em; font-weight: 720; font-variant-numeric: proportional-nums; }
+    .kpi-unit { margin-left: 5px; color: var(--muted); font-size: 12px; font-weight: 500; letter-spacing: 0; }
 
-    @media (max-width: 760px) {
-      body { background: var(--paper); }
-      .wrap { width: min(100% - 36px, 560px); }
-      .topbar { min-height: 70px; }
-      .top-note { max-width: 130px; text-align: right; }
-      main { padding-top: 51px; }
-      .hero { grid-template-columns: 1fr; gap: 38px; padding-bottom: 50px; }
-      h1 { max-width: 560px; }
-      .intro { font-size: 16px; }
-      .map-panel { min-height: 285px; }
-      .guide { grid-template-columns: 1fr; gap: 14px; }
-      .footer { align-items: flex-start; flex-direction: column; gap: 8px; }
+    .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .panel {
+      min-width: 0;
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      box-shadow: var(--shadow);
+    }
+    .panel-wide { grid-column: 1 / -1; }
+    .panel-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 15px; }
+    .panel-heading h2 { margin: 0; font-size: 15px; line-height: 1.25; font-weight: 700; }
+    .panel-heading span { color: var(--subtle); font-size: 11px; }
+    .bar-list { display: grid; gap: 11px; }
+    .bar-row { display: grid; grid-template-columns: minmax(95px, 145px) minmax(50px, 1fr) 38px; align-items: center; gap: 11px; min-height: 23px; border-radius: 3px; }
+    .bar-label { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .bar-track { height: 10px; overflow: hidden; background: var(--surface-soft); border-radius: 2px; }
+    .bar-fill { display: block; height: 100%; min-width: 0; background: var(--blue); border-radius: 0 4px 4px 0; transition: width .25s ease; }
+    .bar-value { color: var(--ink); font-size: 12px; font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; }
+    .chart-empty { padding: 22px 8px; color: var(--muted); font-size: 13px; text-align: center; }
+    .trend-wrap { width: 100%; overflow-x: auto; }
+    .trend-chart { display: block; width: 100%; min-width: 460px; height: 230px; overflow: visible; }
+    .trend-grid { stroke: var(--line); stroke-width: 1; }
+    .trend-line { fill: none; stroke: var(--blue); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .trend-area { fill: var(--blue); opacity: .10; }
+    .trend-point { fill: var(--blue); stroke: var(--surface); stroke-width: 2; cursor: help; }
+    .trend-point:hover, .trend-point:focus { stroke: var(--focus); stroke-width: 3; outline: none; }
+    .axis-label { fill: var(--muted); font-family: inherit; font-size: 10px; }
+    .table-details { margin-top: 15px; border-top: 1px solid var(--line); }
+    .table-details summary { width: fit-content; padding: 10px 0 0; color: var(--blue-dark); cursor: pointer; font-size: 12px; font-weight: 650; }
+    .table-scroll { max-height: 230px; margin-top: 9px; overflow: auto; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .data-table th, .data-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+    .data-table th { position: sticky; top: 0; color: var(--muted); background: var(--surface); font-weight: 650; }
+    .data-table td:last-child, .data-table th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+    .status-message { min-height: 21px; margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+    .status-message.error { color: #b42318; }
+    :root[data-theme="dark"] .status-message.error { color: #ffaaa3; }
+    .footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 20px; padding-top: 17px; color: var(--muted); border-top: 1px solid var(--line); font-size: 11px; }
+    .footer a { color: var(--blue-dark); text-underline-offset: 3px; }
+
+    @media (max-width: 1040px) {
+      .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 700px) {
+      .shell { width: min(100% - 32px, 560px); }
+      .topbar { min-height: 68px; }
+      .top-actions { gap: 9px; }
+      .public-label { display: none; }
+      main { padding-top: 36px; }
+      .page-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
+      .updated { text-align: left; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+      .kpi { min-height: 100px; padding: 14px; }
+      .kpi-value { margin-top: 10px; }
+      .charts { grid-template-columns: 1fr; }
+      .panel-wide { grid-column: auto; }
+      .panel { padding: 16px; }
+      .bar-row { grid-template-columns: minmax(80px, 112px) minmax(40px, 1fr) 32px; gap: 8px; }
+      .footer { flex-direction: column; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
@@ -202,50 +183,289 @@
   </style>
 </head>
 <body>
-  <header class="wrap topbar">
-    <a class="brand" href="./" aria-label="WS Issue Dashboard home">
+  <header class="shell topbar">
+    <div class="brand">
       <span class="brand-mark" aria-hidden="true">WS</span>
       <span class="brand-name">Wondersoft · Issue Dashboard</span>
-    </a>
-    <span class="top-note">Issues, requirements and enhancements</span>
+    </div>
+    <div class="top-actions">
+      <span class="public-label">Public aggregate view</span>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Dark theme</button>
+    </div>
   </header>
 
-  <main class="wrap">
-    <section class="hero" aria-labelledby="page-title">
+  <main class="shell">
+    <div class="page-heading">
       <div>
-        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> Integration operations</p>
-        <h1 id="page-title">A clearer view of every issue.</h1>
-        <p class="intro">Track open issues, follow integration flows, and keep requirements and enhancements visible in one place.</p>
-        <div class="actions">
-          <a class="button" id="dashboard-link" href="https://ws-issue-dashboard.onrender.com">Open the dashboard</a>
-          <a class="text-link" href="https://github.com/vikasuikey/WS-Issue-Dashboard">View the project source</a>
-        </div>
+        <h1>Issue operations</h1>
+        <p>Counts and trends across reported issues, requirements, and enhancements.</p>
       </div>
+      <div class="updated" id="updated-at">Aggregate snapshot</div>
+    </div>
 
-      <div class="map-panel" aria-label="Illustration of connected issue tracking flows">
-        <div class="panel-heading"><strong>Issue flow</strong><span>Tracker overview</span></div>
-        <div class="flow-lines" aria-hidden="true">
-          <svg viewBox="0 0 360 220" preserveAspectRatio="none">
-            <path d="M64 55 C118 55 104 112 180 112 S245 55 302 55" />
-            <path d="M64 55 C115 55 113 169 180 169 S238 112 302 112" />
-          </svg>
-        </div>
-        <div class="node node-a">Reported issue</div>
-        <div class="node node-b">In progress</div>
-        <div class="node node-c">Resolved</div>
-        <span class="panel-caption">One tracker · shared context</span>
-      </div>
-    </section>
+    <p class="status-message" id="status-message" role="status" aria-live="polite">Loading dashboard aggregates…</p>
 
-    <section class="guide" aria-labelledby="hosting-title">
-      <h2 id="hosting-title">A static front door, a live workspace.</h2>
-      <p class="guide-copy">This page is hosted by GitHub Pages. The interactive dashboard and Excel updates run on the separate Flask service. <strong>Once that service is deployed on Render, its URL should match the button above.</strong> If Render assigns a different URL, update the button destination in this file before publishing.</p>
-    </section>
+    <aside class="notice" aria-label="Public data notice">
+      <span class="notice-mark" aria-hidden="true">i</span>
+      <span><strong>Read-only public snapshot.</strong> This page contains aggregate counts only, not individual issue rows. The source workbook remains publicly available in the project repository.</span>
+    </aside>
+
+    <section class="kpis" id="kpis" aria-label="Summary metrics"></section>
+
+    <div class="charts">
+      <section class="panel" aria-labelledby="status-heading">
+        <div class="panel-heading"><h2 id="status-heading">By status</h2><span>Record count</span></div>
+        <div class="bar-list" id="status-chart" role="list" aria-label="Counts by status"></div>
+        <details class="table-details"><summary>View status table</summary><div class="table-scroll" id="status-table"></div></details>
+      </section>
+
+      <section class="panel" aria-labelledby="severity-heading">
+        <div class="panel-heading"><h2 id="severity-heading">By severity</h2><span>Record count</span></div>
+        <div class="bar-list" id="severity-chart" role="list" aria-label="Counts by severity"></div>
+        <details class="table-details"><summary>View severity table</summary><div class="table-scroll" id="severity-table"></div></details>
+      </section>
+
+      <section class="panel" aria-labelledby="type-heading">
+        <div class="panel-heading"><h2 id="type-heading">By record type</h2><span>Record count</span></div>
+        <div class="bar-list" id="type-chart" role="list" aria-label="Counts by record type"></div>
+        <details class="table-details"><summary>View record type table</summary><div class="table-scroll" id="type-table"></div></details>
+      </section>
+
+      <section class="panel" aria-labelledby="delay-heading">
+        <div class="panel-heading"><h2 id="delay-heading">Delay summary</h2><span>Days</span></div>
+        <div class="bar-list" id="delay-chart" role="list" aria-label="Average and maximum delay in days"></div>
+        <details class="table-details"><summary>View delay table</summary><div class="table-scroll" id="delay-table"></div></details>
+      </section>
+
+      <section class="panel panel-wide" aria-labelledby="monthly-heading">
+        <div class="panel-heading"><h2 id="monthly-heading">Monthly reports</h2><span>Most recent 18 months</span></div>
+        <div class="trend-wrap" id="monthly-chart"></div>
+        <details class="table-details"><summary>View monthly table</summary><div class="table-scroll" id="monthly-table"></div></details>
+      </section>
+    </div>
+
+    <footer class="footer">
+      <span>Public, read-only aggregate snapshot. No edits are made from this page.</span>
+      <a href="https://github.com/vikasuikey/WS-Issue-Dashboard">Project source</a>
+    </footer>
   </main>
 
-  <footer class="wrap footer">
-    <span>WS Issue Dashboard</span>
-    <span>GitHub Pages hosts this page; workbook edits are handled by the dashboard service.</span>
-  </footer>
+  <script>
+    const root = document.documentElement;
+    const themeButton = document.getElementById('theme-toggle');
+    const statusMessage = document.getElementById('status-message');
+
+    function setTheme(theme) {
+      root.dataset.theme = theme;
+      themeButton.textContent = theme === 'dark' ? 'Light theme' : 'Dark theme';
+      themeButton.setAttribute('aria-pressed', String(theme === 'dark'));
+      try { localStorage.setItem('dashboard-theme', theme); } catch (_) { /* Storage may be disabled. */ }
+    }
+
+    try {
+      const savedTheme = localStorage.getItem('dashboard-theme');
+      if (savedTheme === 'dark' || savedTheme === 'light') setTheme(savedTheme);
+    } catch (_) { /* Keep the light theme when storage is disabled. */ }
+    themeButton.addEventListener('click', () => {
+      setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark');
+    });
+
+    function element(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function renderKpis(summary) {
+      const specs = [
+        ['Total records', summary.total, ''],
+        ['Open', summary.open, ''],
+        ['In progress', summary.in_progress, ''],
+        ['Closed or resolved', summary.closed, ''],
+        ['Average delay', summary.avg_delay, 'days'],
+        ['Maximum delay', summary.max_delay, 'days'],
+      ];
+      const target = document.getElementById('kpis');
+      target.replaceChildren();
+      specs.forEach(([label, value, unit]) => {
+        const card = element('article', 'kpi');
+        card.append(element('span', 'kpi-label', label));
+        const number = element('strong', 'kpi-value', String(value ?? 0));
+        if (unit) number.append(element('span', 'kpi-unit', unit));
+        card.append(number);
+        target.append(card);
+      });
+    }
+
+    function renderTable(targetId, rows, firstHeading, formatValue = value => String(value)) {
+      const target = document.getElementById(targetId);
+      const table = element('table', 'data-table');
+      const head = document.createElement('thead');
+      const headingRow = document.createElement('tr');
+      headingRow.append(element('th', '', firstHeading), element('th', '', 'Count'));
+      head.append(headingRow);
+      const body = document.createElement('tbody');
+      rows.forEach(([label, value]) => {
+        const row = document.createElement('tr');
+        row.append(element('td', '', String(label)), element('td', '', formatValue(value)));
+        body.append(row);
+      });
+      table.append(head, body);
+      target.replaceChildren(table);
+    }
+
+    function renderBars(chartId, tableId, entries, heading) {
+      const target = document.getElementById(chartId);
+      const usable = entries.filter(([, count]) => Number(count) > 0);
+      if (!usable.length) {
+        target.replaceChildren(element('p', 'chart-empty', 'No aggregate values available.'));
+        renderTable(tableId, entries, heading);
+        return;
+      }
+      const maximum = Math.max(...usable.map(([, count]) => Number(count)));
+      target.replaceChildren();
+      usable.forEach(([label, count]) => {
+        const row = element('div', 'bar-row');
+        row.setAttribute('role', 'listitem');
+        row.tabIndex = 0;
+        row.setAttribute('aria-label', `${label}: ${count}`);
+        row.title = `${label}: ${count}`;
+        row.append(element('span', 'bar-label', label));
+        const track = element('span', 'bar-track');
+        const fill = element('span', 'bar-fill');
+        fill.style.width = `${Math.max(2, Number(count) / maximum * 100)}%`;
+        track.append(fill);
+        row.append(track, element('span', 'bar-value', String(count)));
+        target.append(row);
+      });
+      renderTable(tableId, usable, heading);
+    }
+
+    function renderDelay(summary) {
+      const rows = [['Average delay', Number(summary.avg_delay) || 0], ['Maximum delay', Number(summary.max_delay) || 0]];
+      renderBars('delay-chart', 'delay-table', rows, 'Measure');
+      const table = document.querySelector('#delay-table table');
+      if (table) table.tHead.rows[0].cells[1].textContent = 'Days';
+    }
+
+    function renderMonthly(entries) {
+      const target = document.getElementById('monthly-chart');
+      const values = entries.slice(-18);
+      if (!values.length) {
+        target.replaceChildren(element('p', 'chart-empty', 'No monthly totals available.'));
+        renderTable('monthly-table', [], 'Month');
+        return;
+      }
+
+      const namespace = 'http://www.w3.org/2000/svg';
+      const width = 760;
+      const height = 230;
+      const left = 42;
+      const right = 14;
+      const top = 16;
+      const bottom = 38;
+      const plotWidth = width - left - right;
+      const plotHeight = height - top - bottom;
+      const maxValue = Math.max(1, ...values.map(item => Number(item.count) || 0));
+      const svg = document.createElementNS(namespace, 'svg');
+      svg.setAttribute('class', 'trend-chart');
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      svg.setAttribute('role', 'img');
+      svg.setAttribute('aria-labelledby', 'trend-title trend-description');
+      const title = document.createElementNS(namespace, 'title');
+      title.setAttribute('id', 'trend-title');
+      title.textContent = 'Monthly issue report counts';
+      const description = document.createElementNS(namespace, 'desc');
+      description.setAttribute('id', 'trend-description');
+      description.textContent = `Monthly report counts for ${values.length} months.`;
+      svg.append(title, description);
+
+      [0, .5, 1].forEach(fraction => {
+        const y = top + plotHeight * fraction;
+        const line = document.createElementNS(namespace, 'line');
+        line.setAttribute('class', 'trend-grid');
+        line.setAttribute('x1', left);
+        line.setAttribute('x2', width - right);
+        line.setAttribute('y1', y);
+        line.setAttribute('y2', y);
+        svg.append(line);
+        const label = document.createElementNS(namespace, 'text');
+        label.setAttribute('class', 'axis-label');
+        label.setAttribute('x', left - 9);
+        label.setAttribute('y', y + 3);
+        label.setAttribute('text-anchor', 'end');
+        label.textContent = String(Math.round(maxValue * (1 - fraction)));
+        svg.append(label);
+      });
+
+      const points = values.map((item, index) => {
+        const x = values.length === 1 ? left + plotWidth / 2 : left + index * plotWidth / (values.length - 1);
+        const y = top + plotHeight - (Number(item.count) || 0) / maxValue * plotHeight;
+        return { x, y, item };
+      });
+      const linePoints = points.map(point => `${point.x},${point.y}`).join(' ');
+      const area = document.createElementNS(namespace, 'polygon');
+      area.setAttribute('class', 'trend-area');
+      area.setAttribute('points', `${left},${top + plotHeight} ${linePoints} ${width - right},${top + plotHeight}`);
+      svg.append(area);
+      const line = document.createElementNS(namespace, 'polyline');
+      line.setAttribute('class', 'trend-line');
+      line.setAttribute('points', linePoints);
+      svg.append(line);
+
+      const labelEvery = Math.max(1, Math.ceil(values.length / 6));
+      points.forEach((point, index) => {
+        const dot = document.createElementNS(namespace, 'circle');
+        dot.setAttribute('class', 'trend-point');
+        dot.setAttribute('cx', point.x);
+        dot.setAttribute('cy', point.y);
+        dot.setAttribute('r', '5');
+        dot.setAttribute('tabindex', '0');
+        dot.setAttribute('aria-label', `${point.item.month}: ${point.item.count} reports`);
+        const tooltip = document.createElementNS(namespace, 'title');
+        tooltip.textContent = `${point.item.month}: ${point.item.count} reports`;
+        dot.append(tooltip);
+        svg.append(dot);
+
+        if (index % labelEvery === 0 || index === values.length - 1) {
+          const label = document.createElementNS(namespace, 'text');
+          label.setAttribute('class', 'axis-label');
+          label.setAttribute('x', point.x);
+          label.setAttribute('y', height - 11);
+          label.setAttribute('text-anchor', 'middle');
+          label.textContent = point.item.month;
+          svg.append(label);
+        }
+      });
+
+      target.replaceChildren(svg);
+      renderTable('monthly-table', values.map(item => [item.month, item.count]), 'Month');
+    }
+
+    async function loadDashboard() {
+      try {
+        const response = await fetch('./dashboard-data.json', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Aggregate data file is unavailable.');
+        const data = await response.json();
+        renderKpis(data.summary);
+        renderBars('status-chart', 'status-table', Object.entries(data.status_counts), 'Status');
+        renderBars('severity-chart', 'severity-table', Object.entries(data.severity_counts), 'Severity');
+        renderBars('type-chart', 'type-table', Object.entries(data.record_type_counts), 'Record type');
+        renderDelay(data.summary);
+        renderMonthly(data.monthly_trend);
+        const updated = new Date(data.generated_at);
+        document.getElementById('updated-at').textContent = Number.isNaN(updated.valueOf())
+          ? 'Aggregate snapshot'
+          : `Snapshot updated ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(updated)}`;
+        statusMessage.textContent = 'Aggregate dashboard loaded.';
+      } catch (error) {
+        statusMessage.textContent = 'Dashboard data is not published yet. The Pages build must generate dashboard-data.json.';
+        statusMessage.classList.add('error');
+      }
+    }
+
+    loadDashboard();
+  </script>
 </body>
 </html>
