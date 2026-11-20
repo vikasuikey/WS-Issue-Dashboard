@@ -61,6 +61,29 @@ def _month_key(value):
     return None
 
 
+def _date_ddmmyyyy(value):
+    """Format date as DD-MM-YYYY for display."""
+    if isinstance(value, datetime):
+        return value.strftime('%d-%m-%Y')
+    if isinstance(value, date):
+        return value.strftime('%d-%m-%Y')
+    if not isinstance(value, str):
+        return None
+
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).strftime('%d-%m-%Y')
+    except ValueError:
+        for date_format in ('%m/%d/%Y', '%d-%m-%Y', '%Y-%m-%d'):
+            try:
+                return datetime.strptime(value, date_format).strftime('%d-%m-%Y')
+            except ValueError:
+                continue
+    return None
+
+
 def _date_value(value):
     if isinstance(value, datetime):
         return value.date()
@@ -159,7 +182,7 @@ def build_public_summary(workbook_path, as_of=None):
                     # Collect detailed data for open issues
                     open_issues_detail.append({
                         's_no': serial,
-                        'date_reported': _month_key(row[columns['Date Reported']]),
+                        'date_reported': _date_ddmmyyyy(row[columns['Date Reported']]),
                         'issue': str(row[columns['Issue']] or '').strip() if columns.get('Issue') is not None and columns['Issue'] < len(row) else '',
                         'severity': severity,
                         'ticket_number': str(row[columns['Ticket Number']] or '').strip() if columns.get('Ticket Number') is not None and columns['Ticket Number'] < len(row) else '',
@@ -177,7 +200,7 @@ def build_public_summary(workbook_path, as_of=None):
                     # Collect detailed data for open requirements/enhancements
                     open_req_enh_detail.append({
                         's_no': serial,
-                        'date_reported': _month_key(row[columns['Date Reported']]),
+                        'date_reported': _date_ddmmyyyy(row[columns['Date Reported']]),
                         'issue': str(row[columns['Issue']] or '').strip() if columns.get('Issue') is not None and columns['Issue'] < len(row) else '',
                         'severity': severity,
                         'ticket_number': str(row[columns['Ticket Number']] or '').strip() if columns.get('Ticket Number') is not None and columns['Ticket Number'] < len(row) else '',
