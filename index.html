@@ -133,6 +133,7 @@
     .executive-table-wrapper .data-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; }
     .executive-table-wrapper .data-table td { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .executive-table-wrapper .data-table td:nth-child(3) { max-width: 300px; }
+    .executive-table-wrapper .data-table td:last-child { max-width: none; overflow: visible; text-overflow: unset; white-space: normal; word-wrap: break-word; }
 
     .severity-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: capitalize; }
     .severity-badge.severity-critical { background: #d03b3b; color: #fff; }
@@ -475,7 +476,7 @@
             <td><span class="status-badge status-${(item.status || '').toLowerCase().replace(/\s+/g, '-')}">${item.status || ''}</span></td>
             <td>${escapeHtml(item.responsible || '')}</td>
             <td>${item.delay_days !== null && item.delay_days !== undefined ? item.delay_days : '-'}</td>
-            <td>${escapeHtml((item.last_comments || '').split('\n')[0] || '')}</td>
+            <td>${escapeHtml(item.last_comments || '').replace(/\n/g, '<br>')}</td>
           </tr>
         `).join('');
       }
@@ -493,7 +494,7 @@
             <td><span class="status-badge status-${(item.status || '').toLowerCase().replace(/\s+/g, '-')}">${item.status || ''}</span></td>
             <td>${escapeHtml(item.responsible || '')}</td>
             <td>${item.delay_days !== null && item.delay_days !== undefined ? item.delay_days : '-'}</td>
-            <td>${escapeHtml((item.last_comments || '').split('\n')[0] || '')}</td>
+            <td>${escapeHtml(item.last_comments || '').replace(/\n/g, '<br>')}</td>
           </tr>
         `).join('');
       }
