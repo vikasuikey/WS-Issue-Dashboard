@@ -116,6 +116,12 @@
     .kpi-label { display: block; color: var(--muted); font-size: 12px; }
     .kpi-value { display: block; margin-top: 12px; font-size: clamp(25px, 3vw, 34px); line-height: 1; letter-spacing: -.045em; font-weight: 720; font-variant-numeric: proportional-nums; }
     .kpi-unit { margin-left: 5px; color: var(--muted); font-size: 12px; font-weight: 500; letter-spacing: 0; }
+    .executive-summary { margin-bottom: 16px; }
+    .summary-highlights { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .summary-highlight { min-width: 0; padding: 14px; background: var(--surface-soft); border-radius: 5px; }
+    .summary-highlight-label { display: block; color: var(--muted); font-size: 12px; }
+    .summary-highlight-value { display: block; margin-top: 7px; font-size: 24px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .section-note { margin: -5px 0 14px; color: var(--muted); font-size: 12px; }
 
     .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
     .panel {
@@ -172,6 +178,7 @@
       .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
       .kpi { min-height: 100px; padding: 14px; }
       .kpi-value { margin-top: 10px; }
+      .summary-highlights { grid-template-columns: 1fr; gap: 8px; }
       .charts { grid-template-columns: 1fr; }
       .panel-wide { grid-column: auto; }
       .panel { padding: 16px; }
@@ -210,6 +217,8 @@
       <span class="notice-mark" aria-hidden="true">i</span>
       <span><strong>Read-only public snapshot.</strong> This page contains aggregate counts only, not individual issue rows. The source workbook remains publicly available in the project repository.</span>
     </aside>
+
+    <section class="executive-summary" id="executive-summary" aria-label="Executive summary"></section>
 
     <section class="kpis" id="kpis" aria-label="Summary metrics"></section>
 
@@ -352,6 +361,59 @@
       if (table) table.tHead.rows[0].cells[1].textContent = 'Days';
     }
 
+    function renderExecutiveSummary(executive) {
+      const target = document.getElementById('executive-summary');
+      if (!executive) {
+        target.replaceChildren();
+        return;
+      }
+
+      const highlights = executive.highlights || {};
+      const openBySeverity = executive.open_by_severity || [];
+
+      const totalSummary = executive.total_summary || {};
+
+      // Build the executive summary HTML
+      target.innerHTML = `
+        <h2>Executive Summary</h2>
+        <div class="summary-highlights">
+          <div class="summary-highlight">
+            <span class="summary-highlight-label">Open Issues</span>
+            <span class="summary-highlight-value">${totalSummary.open_issues || 0}</span>
+          </div>
+          <div class="summary-highlight">
+            <span class="summary-highlight-label">Open Requirements / Enhancements</span>
+            <span class="summary-highlight-value">${totalSummary.requirements_enhancements || 0}</span>
+          </div>
+          <div class="summary-highlight">
+            <span class="summary-highlight-label">Closed Issues</span>
+            <span class="summary-highlight-value">${totalSummary.closed_issues || 0}</span>
+          </div>
+          <div class="summary-highlight">
+            <span class="summary-highlight-label">Active High Severity</span>
+            <span class="summary-highlight-value">${highlights.active_high_severity || 0}</span>
+          </div>
+          <div class="summary-highlight">
+            <span class="summary-highlight-label">Closed (Last 7 Days)</span>
+            <span class="summary-highlight-value">${highlights.closed_last_7_days || 0}</span>
+          </div>
+          <div class="summary-highlight">
+            <span class="summary-highlight-label">High Severity Closed (Last 7 Days)</span>
+            <span class="summary-highlight-value">${highlights.high_severity_closed_last_7_days || 0}</span>
+          </div>
+        </div>
+        <p class="section-note">Open by severity breakdown</p>
+        <div class="summary-highlights">
+          ${openBySeverity.map(item => `
+            <div class="summary-highlight">
+              <span class="summary-highlight-label">${item.severity}</span>
+              <span class="summary-highlight-value">${item.total || 0}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
     function renderMonthly(entries) {
       const target = document.getElementById('monthly-chart');
       const values = entries.slice(-18);
@@ -452,6 +514,7 @@
         if (!response.ok) throw new Error('Aggregate data file is unavailable.');
         const data = await response.json();
         renderKpis(data.summary);
+        renderExecutiveSummary(data.executive_summary);
         renderBars('status-chart', 'status-table', Object.entries(data.status_counts), 'Status');
         renderBars('severity-chart', 'severity-table', Object.entries(data.severity_counts), 'Severity');
         renderBars('type-chart', 'type-table', Object.entries(data.record_type_counts), 'Record type');

@@ -1,7 +1,7 @@
 import json
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -63,7 +63,10 @@ class PublicDashboardExportTests(unittest.TestCase):
 
         self.assertEqual(
             set(data),
-            {'generated_at', 'summary', 'status_counts', 'severity_counts', 'record_type_counts', 'monthly_trend'},
+            {
+                'generated_at', 'summary', 'executive_summary', 'status_counts',
+                'severity_counts', 'record_type_counts', 'monthly_trend',
+            },
         )
         self.assertEqual(data['summary'], {
             'total': 4,
@@ -74,6 +77,25 @@ class PublicDashboardExportTests(unittest.TestCase):
             'in_progress': 1,
             'avg_delay': 3.3,
             'max_delay': 5,
+        })
+        self.assertEqual(data['executive_summary'], {
+            'total_summary': {
+                'open_issues': 1,
+                'requirements_enhancements': 2,
+                'closed_issues': 0,
+                'grand_total': 3,
+            },
+            'open_by_severity': [
+                {'severity': 'Critical', 'open_issues': 1, 'open_requirements_enhancements': 0, 'total': 1},
+                {'severity': 'High', 'open_issues': 0, 'open_requirements_enhancements': 1, 'total': 1},
+                {'severity': 'Medium', 'open_issues': 0, 'open_requirements_enhancements': 1, 'total': 1},
+                {'severity': 'Low', 'open_issues': 0, 'open_requirements_enhancements': 0, 'total': 0},
+            ],
+            'highlights': {
+                'active_high_severity': 1,
+                'closed_last_7_days': 0,
+                'high_severity_closed_last_7_days': 0,
+            },
         })
         self.assertEqual(data['status_counts']['Open'], 1)
         self.assertEqual(data['status_counts']['In Progress'], 1)
@@ -137,6 +159,57 @@ class PublicDashboardExportTests(unittest.TestCase):
         self.assertEqual(data['summary']['open_issues'], 2)
         self.assertEqual(data['summary']['open_requirements_enhancements'], 3)
         self.assertEqual(data['record_type_counts']['Requirement / Enhancement'], 3)
+
+    def test_executive_summary_aggregates_match_excel_formulas(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workbook_path = Path(temp_dir) / 'tracker.xlsx'
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = 'Tracker Master'
+            worksheet.append(HEADERS)
+            for serial, status, record_type, severity, closed_date in (
+                (1, 'Open', 'Open Issue', 'Critical', None),
+                (2, 'Closed', 'Open Issue', 'High', date(2026, 11, 6)),
+                (3, 'In Progress', 'Requirement / Enhancement', 'High', None),
+                (4, 'Resolved', 'Requirement / Enhancement', 'Low', date(2026, 11, 4)),
+                (5, 'Closed', 'Requirement / Enhancement', 'Medium', date(2026, 10, 29)),
+                (6, 'Resolved', 'Issue', 'Medium', None),
+                (7, 'In Testing', 'Enhancement', 'High', None),
+            ):
+                row = [None] * len(HEADERS)
+                row[0] = serial
+                row[6] = severity
+                row[11] = closed_date
+                row[13] = status
+                row[16] = record_type
+                worksheet.append(row)
+            workbook.save(workbook_path)
+            workbook.close()
+
+            data = export_public_summary(
+                workbook_path,
+                Path(temp_dir) / 'summary.json',
+                as_of=date(2026, 11, 6),
+            )
+
+        executive = data['executive_summary']
+        self.assertEqual(executive['total_summary'], {
+            'open_issues': 2,
+            'requirements_enhancements': 3,
+            'closed_issues': 2,
+            'grand_total': 7,
+        })
+        self.assertEqual(executive['open_by_severity'], [
+            {'severity': 'Critical', 'open_issues': 1, 'open_requirements_enhancements': 0, 'total': 1},
+            {'severity': 'High', 'open_issues': 0, 'open_requirements_enhancements': 2, 'total': 2},
+            {'severity': 'Medium', 'open_issues': 1, 'open_requirements_enhancements': 0, 'total': 1},
+            {'severity': 'Low', 'open_issues': 0, 'open_requirements_enhancements': 1, 'total': 1},
+        ])
+        self.assertEqual(executive['highlights'], {
+            'active_high_severity': 2,
+            'closed_last_7_days': 1,
+            'high_severity_closed_last_7_days': 1,
+        })
 
     def test_fails_when_required_aggregate_columns_are_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:

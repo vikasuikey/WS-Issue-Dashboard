@@ -3,7 +3,7 @@
 import argparse
 import json
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -61,7 +61,29 @@ def _month_key(value):
     return None
 
 
-def build_public_summary(workbook_path):
+def _date_value(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).date()
+    except ValueError:
+        for date_format in ('%m/%d/%Y', '%d-%m-%Y', '%Y-%m-%d'):
+            try:
+                return datetime.strptime(value, date_format).date()
+            except ValueError:
+                continue
+    return None
+
+
+def build_public_summary(workbook_path, as_of=None):
     """Read Tracker Master and return only allowlisted aggregate values."""
     workbook_file = Path(workbook_path).open('rb')
     try:
@@ -82,10 +104,15 @@ def build_public_summary(workbook_path):
             for index, value in enumerate(headers)
             if value is not None
         }
-        required = ('S.No', 'Date Reported', 'Severity', 'Status', 'Delay in Days', 'Record Type')
+        required = (
+            'S.No', 'Date Reported', 'Severity', 'Status', 'Delay in Days',
+            'Record Type', 'Closed Date',
+        )
         if any(column not in columns for column in required):
             raise ValueError('Tracker Master is missing required aggregate columns')
 
+        as_of = as_of or date.today()
+        recent_start = as_of - timedelta(days=7)
         total = 0
         open_issues = 0
         open_requirements_enhancements = 0
@@ -94,6 +121,14 @@ def build_public_summary(workbook_path):
         record_type_counts = Counter()
         monthly_counts = Counter()
         delays = []
+        executive_open_by_severity = {
+            label: {'open_issues': 0, 'open_requirements_enhancements': 0}
+            for label in ('Critical', 'High', 'Medium', 'Low')
+        }
+        executive_closed = 0
+        executive_active_high = 0
+        executive_closed_last_7_days = 0
+        executive_high_closed_last_7_days = 0
 
         for row in rows:
             serial = row[columns['S.No']] if columns['S.No'] < len(row) else None
@@ -113,8 +148,24 @@ def build_public_summary(workbook_path):
             if raw_status != 'closed':
                 if raw_record_type in OPEN_ISSUE_RECORD_TYPES:
                     open_issues += 1
+                    if severity in executive_open_by_severity:
+                        executive_open_by_severity[severity]['open_issues'] += 1
+                        if severity == 'High':
+                            executive_active_high += 1
                 elif raw_record_type in OPEN_ENHANCEMENT_RECORD_TYPES:
                     open_requirements_enhancements += 1
+                    if severity in executive_open_by_severity:
+                        executive_open_by_severity[severity]['open_requirements_enhancements'] += 1
+                        if severity == 'High':
+                            executive_active_high += 1
+
+            if raw_status == 'closed':
+                executive_closed += 1
+                closed_date = _date_value(row[columns['Closed Date']])
+                if closed_date and recent_start <= closed_date <= as_of:
+                    executive_closed_last_7_days += 1
+                    if severity == 'High':
+                        executive_high_closed_last_7_days += 1
 
             status_counts[status] += 1
             severity_counts[severity] += 1
@@ -146,6 +197,27 @@ def build_public_summary(workbook_path):
                 'avg_delay': avg_delay,
                 'max_delay': max(delays) if delays else 0,
             },
+            'executive_summary': {
+                'total_summary': {
+                    'open_issues': open_issues,
+                    'requirements_enhancements': open_requirements_enhancements,
+                    'closed_issues': executive_closed,
+                    'grand_total': open_issues + open_requirements_enhancements + executive_closed,
+                },
+                'open_by_severity': [
+                    {
+                        'severity': label,
+                        **executive_open_by_severity[label],
+                        'total': sum(executive_open_by_severity[label].values()),
+                    }
+                    for label in executive_open_by_severity
+                ],
+                'highlights': {
+                    'active_high_severity': executive_active_high,
+                    'closed_last_7_days': executive_closed_last_7_days,
+                    'high_severity_closed_last_7_days': executive_high_closed_last_7_days,
+                },
+            },
             'status_counts': {label: status_counts[label] for label in STATUS_LABELS},
             'severity_counts': {label: severity_counts[label] for label in SEVERITY_LABELS},
             'record_type_counts': {label: record_type_counts[label] for label in RECORD_TYPE_LABELS},
@@ -161,8 +233,8 @@ def build_public_summary(workbook_path):
         workbook_file.close()
 
 
-def export_public_summary(workbook_path, output_path):
-    summary = build_public_summary(workbook_path)
+def export_public_summary(workbook_path, output_path, as_of=None):
+    summary = build_public_summary(workbook_path, as_of=as_of)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open('w', encoding='utf-8') as output_file:
