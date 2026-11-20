@@ -476,7 +476,7 @@
             <td><span class="status-badge status-${(item.status || '').toLowerCase().replace(/\s+/g, '-')}">${item.status || ''}</span></td>
             <td>${escapeHtml(item.responsible || '')}</td>
             <td>${item.delay_days !== null && item.delay_days !== undefined ? item.delay_days : '-'}</td>
-            <td>${escapeHtml(item.last_comments || '').replace(/\n/g, '<br>')}</td>
+            <td>${escapeHtml((item.last_comments || '').split('\n').filter(l => l.trim()).pop() || '')}</td>
           </tr>
         `).join('');
       }
@@ -494,7 +494,7 @@
             <td><span class="status-badge status-${(item.status || '').toLowerCase().replace(/\s+/g, '-')}">${item.status || ''}</span></td>
             <td>${escapeHtml(item.responsible || '')}</td>
             <td>${item.delay_days !== null && item.delay_days !== undefined ? item.delay_days : '-'}</td>
-            <td>${escapeHtml(item.last_comments || '').replace(/\n/g, '<br>')}</td>
+            <td>${escapeHtml((item.last_comments || '').split('\n').filter(l => l.trim()).pop() || '')}</td>
           </tr>
         `).join('');
       }
