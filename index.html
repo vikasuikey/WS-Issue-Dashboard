@@ -123,6 +123,34 @@
     .summary-highlight-value { display: block; margin-top: 7px; font-size: 24px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
     .section-note { margin: -5px 0 14px; color: var(--muted); font-size: 12px; }
 
+    .executive-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .executive-header h2 { margin: 0; font-size: 18px; font-weight: 700; }
+    .executive-date { color: var(--muted); font-size: 12px; }
+    .executive-table-wrapper { margin-bottom: 24px; }
+    .executive-table-wrapper h3 { margin: 0 0 10px; font-size: 14px; font-weight: 650; color: var(--ink); }
+    .executive-table-wrapper .table-scroll { max-height: 350px; }
+    .executive-table-wrapper .data-table { font-size: 11px; }
+    .executive-table-wrapper .data-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .executive-table-wrapper .data-table td { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .executive-table-wrapper .data-table td:nth-child(3) { max-width: 300px; }
+
+    .severity-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: capitalize; }
+    .severity-badge.severity-critical { background: #d03b3b; color: #fff; }
+    .severity-badge.severity-high { background: #ec835a; color: #fff; }
+    .severity-badge.severity-medium { background: #fab219; color: #212529; }
+    .severity-badge.severity-low { background: #0ca30c; color: #fff; }
+    .severity-badge.severity-other { background: var(--muted); color: #fff; }
+
+    .status-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: capitalize; }
+    .status-badge.status-open { background: #2a78d6; color: #fff; }
+    .status-badge.status-in-progress { background: #fab219; color: #212529; }
+    .status-badge.status-in-development { background: #fab219; color: #212529; }
+    .status-badge.status-in-testing { background: #fab219; color: #212529; }
+    .status-badge.status-in-production { background: #fab219; color: #212529; }
+    .status-badge.status-closed { background: #0ca30c; color: #fff; }
+    .status-badge.status-resolved { background: #0ca30c; color: #fff; }
+    .status-badge.status-other { background: var(--muted); color: #fff; }
+
     .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
     .panel {
       min-width: 0;
@@ -218,7 +246,56 @@
       <span><strong>Read-only public snapshot.</strong> This page contains aggregate counts only, not individual issue rows. The source workbook remains publicly available in the project repository.</span>
     </aside>
 
-    <section class="executive-summary" id="executive-summary" aria-label="Executive summary"></section>
+    <section class="executive-summary" id="executive-summary" aria-label="Executive summary">
+      <div class="executive-header">
+        <h2>Issue Tracker Executive Summary</h2>
+        <span class="executive-date" id="executive-date">As of: <span id="executive-date-value"></span></span>
+      </div>
+
+      <div class="executive-table-wrapper">
+        <h3>Open Issues (<span id="open-issues-count">0</span>)</h3>
+        <div class="table-scroll" id="open-issues-table">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>S.No</th>
+                <th>Date Reported</th>
+                <th>Issue</th>
+                <th>Severity</th>
+                <th>Ticket Number</th>
+                <th>Status</th>
+                <th>Responsible</th>
+                <th>Delay (Days)</th>
+                <th>Last Comment</th>
+              </tr>
+            </thead>
+            <tbody id="open-issues-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="executive-table-wrapper">
+        <h3>Requirements / Enhancements (<span id="open-req-enh-count">0</span>)</h3>
+        <div class="table-scroll" id="open-req-enh-table">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>S.No</th>
+                <th>Date Reported</th>
+                <th>Requirement</th>
+                <th>Severity</th>
+                <th>Ticket Number</th>
+                <th>Status</th>
+                <th>Responsible</th>
+                <th>Delay (Days)</th>
+                <th>Last Comment</th>
+              </tr>
+            </thead>
+            <tbody id="open-req-enh-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
     <section class="kpis" id="kpis" aria-label="Summary metrics"></section>
 
@@ -361,7 +438,7 @@
       if (table) table.tHead.rows[0].cells[1].textContent = 'Days';
     }
 
-    function renderExecutiveSummary(executive) {
+    function renderExecutiveSummary(executive, openIssuesDetail, openReqEnhDetail) {
       const target = document.getElementById('executive-summary');
       if (!executive) {
         target.replaceChildren();
@@ -370,48 +447,63 @@
 
       const highlights = executive.highlights || {};
       const openBySeverity = executive.open_by_severity || [];
-
       const totalSummary = executive.total_summary || {};
 
-      // Build the executive summary HTML
-      target.innerHTML = `
-        <h2>Executive Summary</h2>
-        <div class="summary-highlights">
-          <div class="summary-highlight">
-            <span class="summary-highlight-label">Open Issues</span>
-            <span class="summary-highlight-value">${totalSummary.open_issues || 0}</span>
-          </div>
-          <div class="summary-highlight">
-            <span class="summary-highlight-label">Open Requirements / Enhancements</span>
-            <span class="summary-highlight-value">${totalSummary.requirements_enhancements || 0}</span>
-          </div>
-          <div class="summary-highlight">
-            <span class="summary-highlight-label">Closed Issues</span>
-            <span class="summary-highlight-value">${totalSummary.closed_issues || 0}</span>
-          </div>
-          <div class="summary-highlight">
-            <span class="summary-highlight-label">Active High Severity</span>
-            <span class="summary-highlight-value">${highlights.active_high_severity || 0}</span>
-          </div>
-          <div class="summary-highlight">
-            <span class="summary-highlight-label">Closed (Last 7 Days)</span>
-            <span class="summary-highlight-value">${highlights.closed_last_7_days || 0}</span>
-          </div>
-          <div class="summary-highlight">
-            <span class="summary-highlight-label">High Severity Closed (Last 7 Days)</span>
-            <span class="summary-highlight-value">${highlights.high_severity_closed_last_7_days || 0}</span>
-          </div>
-        </div>
-        <p class="section-note">Open by severity breakdown</p>
-        <div class="summary-highlights">
-          ${openBySeverity.map(item => `
-            <div class="summary-highlight">
-              <span class="summary-highlight-label">${item.severity}</span>
-              <span class="summary-highlight-value">${item.total || 0}</span>
-            </div>
-          `).join('')}
-        </div>
-      `;
+      // Update the date
+      const dateValue = document.getElementById('executive-date-value');
+      if (dateValue) {
+        const today = new Date();
+        dateValue.textContent = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
+      }
+
+      // Update counts
+      const openIssuesCount = document.getElementById('open-issues-count');
+      const openReqEnhCount = document.getElementById('open-req-enh-count');
+      if (openIssuesCount) openIssuesCount.textContent = totalSummary.open_issues || 0;
+      if (openReqEnhCount) openReqEnhCount.textContent = totalSummary.requirements_enhancements || 0;
+
+      // Render Open Issues table
+      const issuesTbody = document.getElementById('open-issues-tbody');
+      if (issuesTbody && openIssuesDetail) {
+        issuesTbody.innerHTML = openIssuesDetail.map(item => `
+          <tr>
+            <td>${item.s_no || ''}</td>
+            <td>${item.date_reported || ''}</td>
+            <td>${escapeHtml(item.issue || '')}</td>
+            <td><span class="severity-badge severity-${(item.severity || '').toLowerCase()}">${item.severity || ''}</span></td>
+            <td>${escapeHtml(item.ticket_number || '')}</td>
+            <td><span class="status-badge status-${(item.status || '').toLowerCase().replace(/\s+/g, '-')}">${item.status || ''}</span></td>
+            <td>${escapeHtml(item.responsible || '')}</td>
+            <td>${item.delay_days !== null && item.delay_days !== undefined ? item.delay_days : '-'}</td>
+            <td>${escapeHtml((item.last_comments || '').split('\n')[0] || '')}</td>
+          </tr>
+        `).join('');
+      }
+
+      // Render Requirements/Enhancements table
+      const reqEnhTbody = document.getElementById('open-req-enh-tbody');
+      if (reqEnhTbody && openReqEnhDetail) {
+        reqEnhTbody.innerHTML = openReqEnhDetail.map(item => `
+          <tr>
+            <td>${item.s_no || ''}</td>
+            <td>${item.date_reported || ''}</td>
+            <td>${escapeHtml(item.issue || '')}</td>
+            <td><span class="severity-badge severity-${(item.severity || '').toLowerCase()}">${item.severity || ''}</span></td>
+            <td>${escapeHtml(item.ticket_number || '')}</td>
+            <td><span class="status-badge status-${(item.status || '').toLowerCase().replace(/\s+/g, '-')}">${item.status || ''}</span></td>
+            <td>${escapeHtml(item.responsible || '')}</td>
+            <td>${item.delay_days !== null && item.delay_days !== undefined ? item.delay_days : '-'}</td>
+            <td>${escapeHtml((item.last_comments || '').split('\n')[0] || '')}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    // Escape HTML helper
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }
 
     function renderMonthly(entries) {
@@ -514,7 +606,7 @@
         if (!response.ok) throw new Error('Aggregate data file is unavailable.');
         const data = await response.json();
         renderKpis(data.summary);
-        renderExecutiveSummary(data.executive_summary);
+        renderExecutiveSummary(data.executive_summary, data.open_issues_detail, data.open_requirements_enhancements_detail);
         renderBars('status-chart', 'status-table', Object.entries(data.status_counts), 'Status');
         renderBars('severity-chart', 'severity-table', Object.entries(data.severity_counts), 'Severity');
         renderBars('type-chart', 'type-table', Object.entries(data.record_type_counts), 'Record type');

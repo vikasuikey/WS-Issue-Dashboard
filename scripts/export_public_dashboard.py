@@ -130,6 +130,10 @@ def build_public_summary(workbook_path, as_of=None):
         executive_closed_last_7_days = 0
         executive_high_closed_last_7_days = 0
 
+        # Detailed lists for executive summary tables
+        open_issues_detail = []
+        open_req_enh_detail = []
+
         for row in rows:
             serial = row[columns['S.No']] if columns['S.No'] < len(row) else None
             if serial is None:
@@ -152,12 +156,36 @@ def build_public_summary(workbook_path, as_of=None):
                         executive_open_by_severity[severity]['open_issues'] += 1
                         if severity == 'High':
                             executive_active_high += 1
+                    # Collect detailed data for open issues
+                    open_issues_detail.append({
+                        's_no': serial,
+                        'date_reported': _month_key(row[columns['Date Reported']]),
+                        'issue': str(row[columns['Issue']] or '').strip() if columns.get('Issue') is not None and columns['Issue'] < len(row) else '',
+                        'severity': severity,
+                        'ticket_number': str(row[columns['Ticket Number']] or '').strip() if columns.get('Ticket Number') is not None and columns['Ticket Number'] < len(row) else '',
+                        'status': status,
+                        'responsible': str(row[columns['Responsible']] or '').strip() if columns.get('Responsible') is not None and columns['Responsible'] < len(row) else '',
+                        'delay_days': row[columns['Delay in Days']] if columns['Delay in Days'] < len(row) else None,
+                        'last_comments': str(row[columns['Last Comments']] or '').strip() if columns.get('Last Comments') is not None and columns['Last Comments'] < len(row) else '',
+                    })
                 elif raw_record_type in OPEN_ENHANCEMENT_RECORD_TYPES:
                     open_requirements_enhancements += 1
                     if severity in executive_open_by_severity:
                         executive_open_by_severity[severity]['open_requirements_enhancements'] += 1
                         if severity == 'High':
                             executive_active_high += 1
+                    # Collect detailed data for open requirements/enhancements
+                    open_req_enh_detail.append({
+                        's_no': serial,
+                        'date_reported': _month_key(row[columns['Date Reported']]),
+                        'issue': str(row[columns['Issue']] or '').strip() if columns.get('Issue') is not None and columns['Issue'] < len(row) else '',
+                        'severity': severity,
+                        'ticket_number': str(row[columns['Ticket Number']] or '').strip() if columns.get('Ticket Number') is not None and columns['Ticket Number'] < len(row) else '',
+                        'status': status,
+                        'responsible': str(row[columns['Responsible']] or '').strip() if columns.get('Responsible') is not None and columns['Responsible'] < len(row) else '',
+                        'delay_days': row[columns['Delay in Days']] if columns['Delay in Days'] < len(row) else None,
+                        'last_comments': str(row[columns['Last Comments']] or '').strip() if columns.get('Last Comments') is not None and columns['Last Comments'] < len(row) else '',
+                    })
 
             if raw_status == 'closed':
                 executive_closed += 1
@@ -225,6 +253,8 @@ def build_public_summary(workbook_path, as_of=None):
                 {'month': month, 'count': monthly_counts[month]}
                 for month in sorted(monthly_counts)
             ],
+            'open_issues_detail': open_issues_detail,
+            'open_requirements_enhancements_detail': open_req_enh_detail,
         }
     finally:
         if rows is not None:
